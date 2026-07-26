@@ -1,0 +1,3 @@
+genprofiles . langprofiles.dat
+
+pause
