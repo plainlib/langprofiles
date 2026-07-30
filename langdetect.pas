@@ -353,7 +353,7 @@ begin
   Script := Info.Script;
 
   // CJK script refinement (avoid mis-classification due to punctuation or stray kana)
-  if (Script <> stCJK) and (Info.Han > 0) and (Info.Hangul = 0) then
+  if (Script <> stCJK) and (Info.Han >= 5) and (Info.Hangul = 0) and (Info.Latin / Info.Total < 0.5) then
   begin
     Script := stCJK;
     Info.Hiragana := 0;
@@ -377,31 +377,47 @@ begin
   // Norwegian vs Danish vs Swedish
   if (Code = 'no') or (Code = 'da') or (Code = 'sv') then
   begin
-    if (Pos('och', AText) > 0) or (Pos('är', AText) > 0) then
+    // Unique letter for Swedish
+    if Pos('ä', AText) > 0 then
     begin
       Code := 'sv';
       Confidence := 1.0;
       Exit;
-    end
-    else if (Pos('seg', AText) > 0) or (Pos('dere', AText) > 0) then
+    end;
+    // Danish/Norwegian have æ/ø, Swedish doesn't
+    if (Pos('æ', AText) > 0) or (Pos('ø', AText) > 0) then
     begin
-      Code := 'no';
-      Confidence := 1.0;
-      Exit;
-    end
-    else if (Pos('sig', AText) > 0) then
-    begin
-      Code := 'da';
+      if Pos('dere', AText) > 0 then
+        Code := 'no'
+      else if Pos('af', AText) > 0 then
+        Code := 'da'
+      else if Pos('av', AText) > 0 then
+        Code := 'no';
       Confidence := 1.0;
       Exit;
     end;
+    // Fallback to frequent words
+    if (Pos('och', AText) > 0) or (Pos('är', AText) > 0) or (Pos('inte', AText) > 0) then
+      Code := 'sv'
+    else if (Pos('seg', AText) > 0) or (Pos('dere', AText) > 0) then
+      Code := 'no'
+    else if (Pos('sig', AText) > 0) or (Pos('af', AText) > 0) then
+      Code := 'da';
+    Confidence := 1.0;
+    Exit;
   end;
 
-  // Bosnian vs Croatian (same language base, but 'bs' often prefers 'hr')
-  // Serbian vs Croatian (same logic)
-  // We can use unique letters: Bosnian/Serbian often use 'ć', 'č', 'š', 'ž' but all shared.
-  // Instead, rely on script: if it's stCyrillic, could be 'sr', else fallback.
-  // Leave for now as trigrams mostly handle it.
+  // Xhosa vs Zulu
+  if (Code = 'xh') or (Code = 'zu') then
+  begin
+    if Pos('xh', AText) > 0 then
+    begin
+      Code := 'xh';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // If no 'xh', keep the trigram result (could be zu or xh)
+  end;
 
   // Indonesian vs Malay (very similar)
   if (Code = 'id') or (Code = 'ms') then
@@ -454,24 +470,49 @@ begin
   // Spanish vs Galician vs Portuguese
   if (Code = 'es') or (Code = 'gl') or (Code = 'pt') then
   begin
-    if (Pos('ñ', AText) > 0) then
-    begin
-      Code := 'es';
-      Confidence := 1.0;
-      Exit;
-    end
-    else if (Pos('ç', AText) > 0) or (Pos('ão', AText) > 0) then
+    // Strong markers for Portuguese
+    if (Pos('ç', AText) > 0) or (Pos('ão', AText) > 0) then
     begin
       Code := 'pt';
       Confidence := 1.0;
       Exit;
-    end
-    else if (Pos('é', AText) > 0) and (Pos('á', AText) > 0) then
+    end;
+    // Strong marker for Spanish: letter ñ
+    if Pos('ñ', AText) > 0 then
     begin
-      Code := 'gl';
-      Confidence := 0.9;
+      Code := 'es';
+      Confidence := 1.0;
       Exit;
     end;
+    // Galician indicators – specific unique words
+    if (Pos('non', AText) > 0) or (Pos('galego', AText) > 0) or (Pos('nós', AText) > 0) or
+      (Pos('vós', AText) > 0) or (Pos('unha', AText) > 0) or (Pos('dúas', AText) > 0) then
+    begin
+      Code := 'gl';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Article-based heuristic: Galician uses "o"/"a" as definite articles,
+    // Spanish uses "el"/"la". Absence of Spanish articles and presence of
+    // "o" or "a" as separate words (with spaces) suggests Galician.
+    if (Pos(' o ', AText) > 0) or (Pos(' a ', AText) > 0) then
+    begin
+      if (Pos(' el ', AText) = 0) and (Pos(' la ', AText) = 0) and (Pos(' los ', AText) = 0) and (Pos(' las ', AText) = 0) then
+      begin
+        // No Spanish articles found, and no ñ – strong indication of Galician
+        Code := 'gl';
+        Confidence := 0.9;
+        Exit;
+      end
+      else
+      begin
+        // Spanish articles present – it's Spanish
+        Code := 'es';
+        Confidence := 0.9;
+        Exit;
+      end;
+    end;
+    // If no markers, keep the original trigram result (likely es)
   end;
 
   // Czech vs Slovak (very close, but Slovak has 'ä', 'ô', 'ŕ', 'ĺ')

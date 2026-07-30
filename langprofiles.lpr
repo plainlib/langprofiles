@@ -46,6 +46,7 @@ uses
   Classes,
   LazUTF8,
   Interfaces,        // required for LCL-based langdetect unit
+  Crt,
   langdetect,
   osutils,           // provides CompressMemoryStream / DecompressMemoryStream
   langtest;
@@ -56,8 +57,8 @@ const
   LOG_SCALE = 1000;           // multiply log-prob by this for sorting
   POS_WEIGHT_BASE = 60000;    // maximum positional weight (must fit in Word)
   MAGIC_COMPRESSED: array[0..3] of byte = ($47, $50, $52, $4F);   // Magic signature for compressed profile file ('GPRO')
-  DEF_TEST_MAXLEN = 1000;
-  DEF_TEST_ITER = 1;
+  DEF_TEST_MAXLEN = 500;
+  DEF_TEST_ITER = 3;
 
 type
   TTrigWeight = record
@@ -301,7 +302,14 @@ begin
     end;
     Writeln('Done. Profiles saved to ', outFile);
     Writeln('Text dump saved to ', txtFilePath);
-    Readln;
+    WriteLn('Press any key to exit (ESC to quit)...');
+    repeat
+      if KeyPressed then
+      begin
+        if ReadKey = #27 then Break;
+      end;
+      Sleep(50);
+    until False;
   finally
     CloseFile(txtOut);
     fs.Free;

@@ -27,6 +27,7 @@ uses
   Classes,
   LazUTF8,
   Math,
+  Crt,
   langdetect;
 
 const
@@ -153,7 +154,14 @@ begin
 
   WriteLn('----------------------------------------');
   WriteLn(Format('Processed: %d tests over %d files, Correct: %d (%.1f%%)', [TotalTests, TotalTests div Iter, CorrectTests, Percent]));
-  Readln;
+  WriteLn('Press any key to exit (ESC to quit)...');
+  repeat
+    if KeyPressed then
+    begin
+      if ReadKey = #27 then Break;
+    end;
+    Sleep(50);
+  until False;
 end;
 
 end.
