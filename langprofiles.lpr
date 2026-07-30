@@ -48,6 +48,7 @@ const
   FINAL_TOP = 600;            // keep 600 most characteristic trigrams
   LOG_SCALE = 1000;           // multiply log-prob by this for sorting
   POS_WEIGHT_BASE = 60000;          // maximum positional weight (must fit in Word)
+  MAGIC_COMPRESSED: array[0..3] of byte = ($47, $50, $52, $4F);   // Magic signature for compressed profile file ('GPRO')
 
 type
   TTrigWeight = record
@@ -269,6 +270,8 @@ begin
   Rewrite(txtOut);
   fs := TFileStream.Create(outFile, fmCreate);
   try
+    // Write magic to mark the file as compressed
+    fs.WriteBuffer(MAGIC_COMPRESSED[0], SizeOf(MAGIC_COMPRESSED));
     fs.WriteBuffer(totalLangs, SizeOf(totalLangs));
     for i := 0 to totalLangs - 1 do
     begin

@@ -1,3 +1,3 @@
-genprofiles corpus langprofiles.dat
+langprofiles corpus langprofiles.dat
 
 pause
