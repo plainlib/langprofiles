@@ -7,6 +7,7 @@
 
 A command-line tool that reads a directory of UTF-8 text corpora (one file per language)
 and produces a compact binary profile file used for fast language detection.
+Also includes a built‑in test mode to evaluate detection accuracy on the same corpora.
 
 ## Features
 
@@ -23,6 +24,7 @@ and produces a compact binary profile file used for fast language detection.
   the detection library.
 - Also generates a human‑readable text dump (`.txt`) with the list of selected trigrams
   for each language.
+- Test mode runs `DetectLanguageWithConfidence` on the corpus files and reports accuracy.
 
 ## Binary File Format
 
@@ -32,7 +34,7 @@ All integers are little‑endian.
 
 | Offset | Field | Type | Description |
 |--------|-------|------|-------------|
-| 0 | Magic | 4 bytes | `GPRO` signature (optional, marks compressed format) |
+| 0 | Magic | 4 bytes | `GPRO` signature (always present for files created by this tool, marks compressed format) |
 | 4 | TotalLanguages | Integer | Number of language entries |
 | 8 | LanguageBlocks | sequence | For each language: CompressedSize (Cardinal) followed by compressed data |
 
@@ -60,19 +62,50 @@ otherwise fall back to the legacy uncompressed layout.
 
 ## Usage
 
+The program has two modes: **test** and **generation**.
+
+### Test mode (default when no `gen` argument)
+
 ```bash
-./genprofiles <corpus_dir> <output_file>
+langprofiles                           # run test with default settings
+langprofiles <max_len> [<iter>]        # custom sample size and number of samples
 ```
 
-- `corpus_dir` – directory containing one `.txt` file per language.  
-  The file name (without extension) is used as the language code (e.g., `en.txt` → code `en`).
-- `output_file` – path to the generated binary profile (e.g., `profiles.bin`).  
-  A text dump with the same name but `.txt` extension will be created alongside.
+- `max_len` – maximum characters taken from each file (default 500).
+- `iter` – number of samples per file (default 3). If the file is longer than `max_len`,
+  a sliding window is used. Only one sample is taken if the file is shorter.
 
-### Example
+**Examples:**
 
 ```bash
-./genprofiles ./corpora ./profiles.bin
+langprofiles                    # test with max_len=500, iter=3
+langprofiles 1000               # test with max_len=1000, iter=3
+langprofiles 800 5              # test with max_len=800, iter=5
+```
+
+The test scans the `.\corpus` directory, loads each `.txt` file, and runs the detection
+function. It reports per‑file results and overall accuracy.
+
+### Generation mode
+
+```bash
+langprofiles gen                            # generate with default paths
+langprofiles gen <corpus_dir> <out_file>    # custom paths
+```
+
+- `corpus_dir` – directory containing one `.txt` file per language.
+  The file name (without extension) is used as the language code (e.g., `en.txt` → code `en`).
+- `out_file` – path to the generated binary profile (e.g., `profiles.bin`).
+  A text dump with the same name but `.txt` extension is created alongside.
+
+Defaults:
+- corpus directory: `.\corpus`
+- output file: `.\langprofiles.dat` (and `.\langprofiles.txt` for the text dump)
+
+**Example:**
+
+```bash
+langprofiles gen ./corpora ./profiles.bin
 ```
 
 Output:
@@ -90,16 +123,16 @@ Text dump saved to ./profiles.txt
 Compile from the command line:
 
 ```bash
-fpc genprofiles.lpr
+fpc langprofiles.lpr
 ```
 
-Or open `genprofiles.lpr` in Lazarus and build as a console application.
+Or open `langprofiles.lpr` in Lazarus and build as a console application.
 
 No external dependencies beyond the standard Free Pascal libraries.
 
 ## How It Works
 
-1. **Scan** the input directory for `.txt` files, skip any corpus shorter than 10 000 codepoints.
+1. **Scan** the input directory for `.txt` files, skip any corpus shorter than 10 000 codepoints.
 2. For each language:
    - Load the text, clean and normalise it (whitespace collapsing, script filtering, lowercasing).
    - Extract all overlapping character trigrams.
@@ -118,3 +151,10 @@ Compression typically reduces the profile file size by 3–5×, making distribut
 ## License
 
 This project is distributed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+**Language corpora were obtained from:**
+
+xu-song/cc100-samples
+https://huggingface.co/datasets/xu-song/cc100-samples
+
+License: unknown
