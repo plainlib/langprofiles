@@ -10,7 +10,7 @@
         <MainUnitHasScaledStatement Value="False"/>
       </Flags>
       <SessionStorage Value="InProjectDir"/>
-      <Title Value="genprofiles"/>
+      <Title Value="langprofiles"/>
       <UseAppBundle Value="False"/>
       <ResourceType Value="res"/>
     </General>
@@ -31,7 +31,7 @@
     </RequiredPackages>
     <Units>
       <Unit>
-        <Filename Value="genprofiles.lpr"/>
+        <Filename Value="langprofiles.lpr"/>
         <IsPartOfProject Value="True"/>
       </Unit>
     </Units>
@@ -40,7 +40,7 @@
     <Version Value="11"/>
     <PathDelim Value="\"/>
     <Target>
-      <Filename Value="genprofiles"/>
+      <Filename Value="langprofiles"/>
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
