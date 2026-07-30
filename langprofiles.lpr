@@ -16,7 +16,7 @@
 //       contribute stronger in the distance metric.
 //    5. Pack the language data into a memory stream, compress it with zlib
 //       (deflate), and write the compressed block prefixed by its size.
-
+//-----------------------------------------------------------------------------------
 //  The resulting binary format is:
 //      [totalLangs: Integer]
 //      For each language:
@@ -24,11 +24,11 @@
 //      The compressed block contains:
 //        [codeLen: Integer][langCode: UTF-8 bytes]
 //        [trigCount: Integer][for each trigram: trigLen: Integer, trig: UTF-8 bytes, weight: Word]
-
+//-----------------------------------------------------------------------------------
 //  Zlib compression is used to reduce the profile file size 3-5x without
 //  any noticeable runtime cost – decompression is extremely fast (hundreds
 //  of MB/s) and the smaller file loads quicker from disk.
-
+//-----------------------------------------------------------------------------------
 //  Usage: ./langprofiles <corpus_dir> <output_file>
 //-----------------------------------------------------------------------------------
 
@@ -47,7 +47,7 @@ const
   MIN_TEXT_LENGTH = 10000;
   FINAL_TOP = 600;            // keep 600 most characteristic trigrams
   LOG_SCALE = 1000;           // multiply log-prob by this for sorting
-  POS_WEIGHT_BASE = 60000;          // maximum positional weight (must fit in Word)
+  POS_WEIGHT_BASE = 60000;    // maximum positional weight (must fit in Word)
   MAGIC_COMPRESSED: array[0..3] of byte = ($47, $50, $52, $4F);   // Magic signature for compressed profile file ('GPRO')
 
 type
