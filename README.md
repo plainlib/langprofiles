@@ -1,5 +1,9 @@
-```markdown
 # langprofiles – Language Profile Generator
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Build with: Lazarus](https://img.shields.io/badge/Build_with-Lazarus-blueviolet)](https://www.lazarus-ide.org/)
+[![Platform: Windows Linux](https://img.shields.io/badge/Platform-Windows_Linux-yellow)](#)
+[![Latest Release](https://img.shields.io/github/v/release/plainlib/langprofiles?label=Release)](https://github.com/plainlib/langprofiles/releases/latest)
 
 A command-line tool that reads a directory of UTF-8 text corpora (one file per language)
 and produces a compact binary profile file used for fast language detection.
@@ -114,4 +118,3 @@ Compression typically reduces the profile file size by 3–5×, making distribut
 ## License
 
 This project is distributed under the MIT License. See the [LICENSE](LICENSE) file for details.
-```

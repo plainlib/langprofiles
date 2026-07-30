@@ -1,3 +1,1 @@
-langprofiles corpus langprofiles.dat
-
-pause
+langprofiles gen corpus langprofiles.dat
