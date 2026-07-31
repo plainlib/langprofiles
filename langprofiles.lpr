@@ -46,7 +46,6 @@ uses
   Classes,
   LazUTF8,
   Interfaces,        // required for LCL-based langdetect unit
-  Crt,
   langdetect,
   osutils,           // provides CompressMemoryStream / DecompressMemoryStream
   langtest;
@@ -303,13 +302,7 @@ begin
     Writeln('Done. Profiles saved to ', outFile);
     Writeln('Text dump saved to ', txtFilePath);
     WriteLn('Press any key to exit (ESC to quit)...');
-    repeat
-      if KeyPressed then
-      begin
-        if ReadKey = #27 then Break;
-      end;
-      Sleep(50);
-    until False;
+    WaitForEsc;
   finally
     CloseFile(txtOut);
     fs.Free;

@@ -15,6 +15,9 @@ unit langtest;
 
 interface
 
+// Pause with exit via ESC
+procedure WaitForEsc;
+
 // Run language detection test on corpus files in the given directory.
 // MaxLen: maximum number of characters taken from each file (starting at 1).
 // Iter:   number of samples per file (sliding window if file longer than MaxLen).
@@ -23,15 +26,48 @@ procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Ite
 implementation
 
 uses
+  {$IFDEF WINDOWS}
+  Windows,
+  {$ENDIF}
   SysUtils,
   Classes,
   LazUTF8,
   Math,
-  Crt,
   langdetect;
 
 const
   BOM_UTF8 = #239#187#191;
+
+procedure WaitForEsc;
+{$IFDEF WINDOWS}
+var
+  hIn: THandle;
+  Mode: DWORD = 0;
+  Rec: TInputRecord;
+  Read: DWORD = 0;
+{$ENDIF}
+begin
+  Rec := Default(TInputRecord);
+
+  WriteLn('Press ESC to quit...');
+  {$IFDEF WINDOWS}
+  hIn := GetStdHandle(STD_INPUT_HANDLE);
+
+  GetConsoleMode(hIn, Mode);
+  SetConsoleMode(hIn, ENABLE_PROCESSED_INPUT or ENABLE_WINDOW_INPUT);
+
+  repeat
+    ReadConsoleInput(hIn, Rec, 1, Read);
+
+    if (Rec.EventType = KEY_EVENT) and
+       Rec.Event.KeyEvent.bKeyDown and
+       (Rec.Event.KeyEvent.wVirtualKeyCode = VK_ESCAPE) then
+      Break;
+  until False;
+  {$ELSE}
+  Readln;
+  {$ENDIF}
+end;
 
 procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Iter: integer);
 var
@@ -154,14 +190,7 @@ begin
 
   WriteLn('----------------------------------------');
   WriteLn(Format('Processed: %d tests over %d files, Correct: %d (%.1f%%)', [TotalTests, TotalTests div Iter, CorrectTests, Percent]));
-  WriteLn('Press any key to exit (ESC to quit)...');
-  repeat
-    if KeyPressed then
-    begin
-      if ReadKey = #27 then Break;
-    end;
-    Sleep(50);
-  until False;
+  WaitForEsc;
 end;
 
 end.
