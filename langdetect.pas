@@ -43,10 +43,17 @@ function DetectLanguageWithConfidence(const AText: string; out Confidence: doubl
 implementation
 
 type
+  // Entry for binary search: trigram + its weight
+  TTrigEntry = record
+    Trig: string;
+    Weight: word;
+  end;
+
   TProfile = record
     Code: string;
     Trigrams: TStringArray;   // sorted by frequency, most frequent first
     Freqs: array of word;     // corresponding frequency values (same order)
+    SortedTrigrams: array of TTrigEntry; // alphabetically sorted for binary search
   end;
 
 var
@@ -302,45 +309,74 @@ begin
 end;
 
 // Frequency-aware distance (lower = better).
-// For each trigram of the text, if found in profile, adds a negative penalty
-// proportional to its frequency (or rank). Missing trigrams add a fixed positive penalty.
+// Uses binary search on SortedTrigrams if available, otherwise falls back to linear search.
 function DistanceToProfile(const TextTrigrams: TStringArray; const Profile: TProfile): double;
 const
   MISSING_PENALTY = 100;               // penalty for a trigram not found
-  MAX_POS_WEIGHT = 100;               // used when Freqs are not available
 var
   i, j: integer;
-  score: integer;                      // total accumulated score (negative = good)
+  score: integer;
   freq: integer;
   tested: integer;
+  L, R, M: integer;
 begin
   score := 0;
   tested := 0;
-  for i := 0 to High(TextTrigrams) do
+  if Length(Profile.SortedTrigrams) > 0 then
   begin
-    freq := -1;                        // -1 means not found
-    for j := 0 to High(Profile.Trigrams) do
-      if Profile.Trigrams[j] = TextTrigrams[i] then
+    // Binary search on sorted trigram list
+    for i := 0 to High(TextTrigrams) do
+    begin
+      L := 0;
+      R := Length(Profile.SortedTrigrams) - 1;
+      freq := -1;
+      while L <= R do
       begin
-        // Use stored frequency if available, otherwise fallback to positional weight
-        if j < Length(Profile.Freqs) then
-          freq := Profile.Freqs[j]
+        M := (L + R) div 2;
+        if Profile.SortedTrigrams[M].Trig = TextTrigrams[i] then
+        begin
+          freq := Profile.SortedTrigrams[M].Weight;
+          Break;
+        end
+        else if Profile.SortedTrigrams[M].Trig < TextTrigrams[i] then
+          L := M + 1
         else
-          freq := MAX_POS_WEIGHT - j;   // first positions get higher weight
-        Break;
+          R := M - 1;
       end;
-
-    if freq >= 0 then
-      Dec(score, freq)                  // negative contribution (better)
-    else
-      Inc(score, MISSING_PENALTY);     // positive contribution (worse)
-    Inc(tested);
+      if freq >= 0 then
+        Dec(score, freq)
+      else
+        Inc(score, MISSING_PENALTY);
+      Inc(tested);
+    end;
+  end
+  else
+  begin
+    // Fallback to original linear search for profiles without sorted list (built‑in defaults)
+    for i := 0 to High(TextTrigrams) do
+    begin
+      freq := -1;
+      for j := 0 to High(Profile.Trigrams) do
+        if Profile.Trigrams[j] = TextTrigrams[i] then
+        begin
+          if j < Length(Profile.Freqs) then
+            freq := Profile.Freqs[j]
+          else
+            freq := 100 - j;   // approximate positional weight when Freqs missing
+          Break;
+        end;
+      if freq >= 0 then
+        Dec(score, freq)
+      else
+        Inc(score, MISSING_PENALTY);
+      Inc(tested);
+    end;
   end;
 
   if tested = 0 then
     Result := MISSING_PENALTY
   else
-    Result := score / tested;           // average – lower (more negative) wins
+    Result := score / tested;
 end;
 
 // Detects script, refines CJK classification, and returns script info.
@@ -419,14 +455,6 @@ begin
     // If no 'xh', keep the trigram result (could be zu or xh)
   end;
 
-  // Indonesian vs Malay (very similar)
-  if (Code = 'id') or (Code = 'ms') then
-  begin
-    // Malay uses 'msia', 'kementerian' etc, but short texts don't guarantee
-    // Use presence of 'saya' (ID) vs 'saye' (MS) – not reliable.
-    // Better to keep as is; 8/10 is already good.
-  end;
-
   // Belarusian vs others (unique letter 'ў')
   if (Code = 'be') or (Code = 'uk') or (Code = 'ru') then
   begin
@@ -485,8 +513,8 @@ begin
       Exit;
     end;
     // Galician indicators – specific unique words
-    if (Pos('non', AText) > 0) or (Pos('galego', AText) > 0) or (Pos('nós', AText) > 0) or
-      (Pos('vós', AText) > 0) or (Pos('unha', AText) > 0) or (Pos('dúas', AText) > 0) then
+    if (Pos('non', AText) > 0) or (Pos('galego', AText) > 0) or (Pos('nós', AText) > 0) or (Pos('vós', AText) > 0) or
+      (Pos('unha', AText) > 0) or (Pos('dúas', AText) > 0) then
     begin
       Code := 'gl';
       Confidence := 1.0;
@@ -767,7 +795,6 @@ end;
 {$include langprofiles_data.inc}
 
 // Internal routine that does the actual merge from any TStream
-// Internal routine that does the actual merge from any TStream
 procedure MergeProfilesFromStream(AStream: TStream);
 const
   MAX_TRIGRAMS = 2000;
@@ -776,7 +803,7 @@ var
   magic: cardinal;
   isCompressed: boolean;
   totalLangs, Count: integer;
-  i, j, trigCount, existingIdx: integer;
+  i, j, k, trigCount, existingIdx: integer;
   codeLen: integer;
   code: string = string.Empty;
   trigLen: integer;
@@ -786,6 +813,7 @@ var
   comprSize: cardinal;
   tempStream: TMemoryStream;
   plainStream: TMemoryStream;
+  entry: TTrigEntry;
 begin
   // Detect format: if first 4 bytes are 'GPRO', it's compressed
   magic := 0;
@@ -815,24 +843,9 @@ begin
       AStream.ReadBuffer(comprSize, SizeOf(comprSize));
       if (comprSize <= 0) or (comprSize > AStream.Size - AStream.Position) then
         raise Exception.Create('Invalid compressed size');
-      // Read compressed data into a temporary memory stream to pass to decompressor
       tempStream := TMemoryStream.Create;
       try
         tempStream.CopyFrom(AStream, comprSize);
-        tempStream.Position := 0;
-        // DecompressMemoryStream expects the stream to contain 4-byte original size + data
-        // So we need to extract the original size first? Our DecompressMemoryStream above
-        // reads original size from the stream. We'll use it directly.
-        // But better: decompress and then read language data from the resulting stream.
-        // We'll adjust: instead of using DecompressMemoryStream, we'll extract originalSize
-        // and do the decompression inline, or use a simpler helper.
-        // Let's use a local function that works on a given stream.
-        // Actually, DecompressMemoryStream expects a stream that starts with original size;
-        // our compressed block in the file is exactly that: it starts with original size.
-        // So we can pass a TMemoryStream that contains the whole compressed block.
-        // That's what we have in tempStream. So we can call DecompressMemoryStream(tempStream).
-        // But DecompressMemoryStream as defined above reads originalSize from the current position,
-        // then reads the rest. So that works perfectly.
         tempStream.Position := 0;
         plainStream := TOS.DecompressMemoryStream(tempStream);
         try
@@ -915,9 +928,29 @@ begin
         fileProfiles[i].Freqs[j] := freq;
       end;
     end;
+
+    // Build sorted trigram list for binary search
+    if trigCount > 0 then
+    begin
+      SetLength(fileProfiles[i].SortedTrigrams, trigCount);
+      for j := 0 to trigCount - 1 do
+      begin
+        fileProfiles[i].SortedTrigrams[j].Trig := fileProfiles[i].Trigrams[j];
+        fileProfiles[i].SortedTrigrams[j].Weight := fileProfiles[i].Freqs[j];
+      end;
+      // Sort alphabetically (bubble sort – fast enough for one-time init of 2000 items)
+      for j := 0 to trigCount - 2 do
+        for k := j + 1 to trigCount - 1 do
+          if fileProfiles[i].SortedTrigrams[j].Trig > fileProfiles[i].SortedTrigrams[k].Trig then
+          begin
+            entry := fileProfiles[i].SortedTrigrams[j];
+            fileProfiles[i].SortedTrigrams[j] := fileProfiles[i].SortedTrigrams[k];
+            fileProfiles[i].SortedTrigrams[k] := entry;
+          end;
+    end;
   end;
 
-  // Merge into global Profiles (unchanged)
+  // Merge into global Profiles
   for i := 0 to High(fileProfiles) do
   begin
     if fileProfiles[i].Code = '' then Continue;
@@ -932,6 +965,7 @@ begin
     begin
       Profiles[existingIdx].Trigrams := fileProfiles[i].Trigrams;
       Profiles[existingIdx].Freqs := fileProfiles[i].Freqs;
+      Profiles[existingIdx].SortedTrigrams := fileProfiles[i].SortedTrigrams;
     end
     else
     begin

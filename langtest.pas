@@ -33,6 +33,7 @@ uses
   Classes,
   LazUTF8,
   Math,
+  DateUtils,        // for MilliSecondsBetween
   langdetect;
 
 const
@@ -86,6 +87,7 @@ var
   TextLen: integer;
   Percent: double;
   ResultsLine: string;
+  StartTime, EndTime: TDateTime;
 begin
   if not DirectoryExists(CorpusDir) then
   begin
@@ -99,6 +101,8 @@ begin
     WriteLn('Samples per file: ', Iter);
   WriteLn('----------------------------------------');
 
+  StartTime := Now;
+
   if FindFirst(CorpusDir + '\*.txt', faAnyFile, SR) = 0 then
   begin
     repeat
@@ -106,18 +110,18 @@ begin
       if SR.Attr and faDirectory <> 0 then Continue;
 
       // read whole file
-    try
-      with TStringList.Create do
       try
-        LoadFromFile(FullPath);
-        RawText := Text;
-      finally
-        Free;
+        with TStringList.Create do
+        try
+          LoadFromFile(FullPath);
+          RawText := Text;
+        finally
+          Free;
+        end;
+      except
+        WriteLn(SR.Name, ' -> [read error]');
+        Continue;
       end;
-    except
-      WriteLn(SR.Name, ' -> [read error]');
-      Continue;
-    end;
 
       // strip UTF-8 BOM if present
       if Copy(RawText, 1, 3) = BOM_UTF8 then
@@ -183,6 +187,8 @@ begin
     FindClose(SR);
   end;
 
+  EndTime := Now;
+
   if TotalTests > 0 then
     Percent := CorrectTests * 100.0 / TotalTests
   else
@@ -190,6 +196,7 @@ begin
 
   WriteLn('----------------------------------------');
   WriteLn(Format('Processed: %d tests over %d files, Correct: %d (%.1f%%)', [TotalTests, TotalTests div Iter, CorrectTests, Percent]));
+  WriteLn(Format('Test completed in %d ms.', [MilliSecondsBetween(EndTime, StartTime)]));
   WaitForEsc;
 end;
 
