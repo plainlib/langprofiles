@@ -797,7 +797,7 @@ end;
 // Internal routine that does the actual merge from any TStream
 procedure MergeProfilesFromStream(AStream: TStream);
 const
-  MAX_TRIGRAMS = 2000;
+  MAX_TRIGRAMS = 1000;
   MAGIC_COMPRESSED: cardinal = $4F525047; // 'GPRO' in little-endian
 var
   magic: cardinal;

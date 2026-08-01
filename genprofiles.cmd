@@ -1,1 +1,0 @@
-langprofiles gen corpus langprofiles.dat
