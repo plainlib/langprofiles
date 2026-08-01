@@ -32,8 +32,9 @@
 //  Usage:
 //    langprofiles                            run test with .\corpus (max 500, 5 samples)
 //    langprofiles <max_len> <iter>           test with custom sample size and count
-//    langprofiles gen                        generate profiles from .\corpus to .\langprofiles.dat
-//    langprofiles gen <corpus_dir> <out_file>  generate with custom paths
+//    langprofiles gen [-n <N>]               generate profiles from .\corpus to .\langprofiles.dat
+//    langprofiles gen <corpus_dir> <out_file> [-n <N>]  generate with custom paths
+//    -n <N>  number of trigrams per language (default 600)
 //-----------------------------------------------------------------------------------
 
 program langprofiles;
@@ -111,10 +112,12 @@ var
   comprSize: cardinal;
   TestMaxLen: integer;
   TestIter: integer;
+  NumTrigrams: integer;
 begin
   // Default parameters
   TestMaxLen := DEF_TEST_MAXLEN;
   TestIter := DEF_TEST_ITER;
+  NumTrigrams := FINAL_TOP;
 
   // Parse command line
   if ParamCount = 0 then
@@ -126,15 +129,23 @@ begin
 
   if SameText(ParamStr(1), 'gen') then
   begin
-    // Generation mode
-    if ParamCount >= 2 then
-      corpusDir := ParamStr(2)
-    else
-      corpusDir := '.\corpus';
-    if ParamCount >= 3 then
-      outFile := ParamStr(3)
-    else
-      outFile := '.\langprofiles.dat';
+    corpusDir := '.\corpus';
+    outFile   := '.\langprofiles.dat';
+    i := 2;
+    while i <= ParamCount do
+    begin
+      if (ParamStr(i) = '-n') and (i + 1 <= ParamCount) then
+      begin
+        NumTrigrams := StrToIntDef(ParamStr(i+1), NumTrigrams);
+        Inc(i, 2);
+        Continue;
+      end;
+      if corpusDir = '.\corpus' then
+        corpusDir := ParamStr(i)
+      else if outFile = '.\langprofiles.dat' then
+        outFile := ParamStr(i);
+      Inc(i);
+    end;
   end
   else
   begin
@@ -256,8 +267,8 @@ begin
       // Sort by descending log-weight and keep top FINAL_TOP
       if Length(weights) > 1 then
         SortByWeight(weights, 0, High(weights));
-      if Length(weights) > FINAL_TOP then
-        SetLength(weights, FINAL_TOP);
+      if Length(weights) > NumTrigrams then
+        SetLength(weights, NumTrigrams);
 
       trigCount := Length(weights);
 

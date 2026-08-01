@@ -770,7 +770,7 @@ end;
 // Internal routine that does the actual merge from any TStream
 procedure MergeProfilesFromStream(AStream: TStream);
 const
-  MAX_TRIGRAMS = 1000;
+  MAX_TRIGRAMS = 2000;
   MAGIC_COMPRESSED: cardinal = $4F525047; // 'GPRO' in little-endian
 var
   magic: cardinal;
@@ -964,6 +964,17 @@ var
 
 initialization
   InitDefaultProfiles;
+
+  // Do not attempt to load external profiles when the language profile
+  // generator (langprofiles) is running with the 'gen' command.
+  // The generator only uses the trigram extraction routines and does not
+  // need detection profiles – a corrupted output file must not prevent it
+  // from starting.
+  if (LowerCase(ExtractFileName(ParamStr(0))) = 'langprofiles') or (LowerCase(ExtractFileName(ParamStr(0))) = 'langprofiles.exe') then
+  begin
+    if (ParamCount >= 1) and SameText(ParamStr(1), 'gen') then
+      Exit;   // Generator mode – skip external profile loading
+  end;
 
   ExePath := ExtractFilePath(ParamStr(0));
   if FileExists(ExePath + 'langprofiles.dat') then

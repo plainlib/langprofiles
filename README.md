@@ -89,18 +89,24 @@ function. It reports per‑file results and overall accuracy.
 ### Generation mode
 
 ```bash
-langprofiles gen                            # generate with default paths
-langprofiles gen <corpus_dir> <out_file>    # custom paths
+langprofiles gen                            # generate with default paths and 600 trigrams
+langprofiles gen -n 800                     # custom trigram count, default paths
+langprofiles gen <corpus_dir> <out_file>    # custom paths, 600 trigrams
+langprofiles gen <corpus_dir> <out_file> -n 800  # custom paths and trigram count
 ```
 
 - `corpus_dir` – directory containing one `.txt` file per language.
   The file name (without extension) is used as the language code (e.g., `en.txt` → code `en`).
 - `out_file` – path to the generated binary profile (e.g., `profiles.bin`).
   A text dump with the same name but `.txt` extension is created alongside.
+- `-n <number>` – (optional) number of top trigrams to keep per language (default: 600).
+  Higher values increase profile size and detection accuracy; lower values reduce size but may miss rare features.
+  Example: `-n 1000` stores the 1000 most frequent trigrams.
 
 Defaults:
 - corpus directory: `.\corpus`
 - output file: `.\langprofiles.dat` (and `.\langprofiles.txt` for the text dump)
+- trigrams per language: 600
 
 **Example:**
 
