@@ -54,6 +54,7 @@ type
     Trigrams: TStringArray;   // sorted by frequency, most frequent first
     Freqs: array of word;     // corresponding frequency values (same order)
     SortedTrigrams: array of TTrigEntry; // alphabetically sorted for binary search
+    Priority: word;   // lower = more common, used for short texts tie-breaking
   end;
 
 var
@@ -575,12 +576,130 @@ begin
   end;
 end;
 
+// Returns a priority value for a language code.
+// Lower value = more widely spoken / higher base frequency.
+// Used for tie‑breaking on very short texts.
+function GetLanguagePriority(const Code: string): word;
+begin
+  case Code of
+    'en': Result := 1;
+    'zh-CN': Result := 2;
+    'zh-TW': Result := 3;
+    'hi': Result := 4;
+    'es': Result := 5;
+    'ar': Result := 6;
+    'fr': Result := 7;
+    'pt': Result := 8;
+    'ru': Result := 9;
+    'ja': Result := 10;
+    'de': Result := 11;
+    'ko': Result := 12;
+    'it': Result := 13;
+    'tr': Result := 14;
+    'pl': Result := 15;
+    'uk': Result := 16;
+    'nl': Result := 17;
+    'el': Result := 18;
+    'cs': Result := 19;
+    'sv': Result := 20;
+    'hu': Result := 21;
+    'ro': Result := 22;
+    'fi': Result := 23;
+    'da': Result := 24;
+    'no': Result := 25;
+    'sk': Result := 26;
+    'bg': Result := 27;
+    'sr': Result := 28;
+    'hr': Result := 29;
+    'lt': Result := 30;
+    'lv': Result := 31;
+    'sl': Result := 32;
+    'et': Result := 33;
+    'he': Result := 34;
+    'iw': Result := 35;   // Hebrew alternate code
+    'id': Result := 36;
+    'ms': Result := 37;
+    'vi': Result := 38;
+    'th': Result := 39;
+    'fa': Result := 40;
+    'ur': Result := 41;
+    'ta': Result := 42;
+    'te': Result := 43;
+    'bn': Result := 44;
+    'mr': Result := 45;
+    'gu': Result := 46;
+    'pa': Result := 47;
+    'or': Result := 48;
+    'ml': Result := 49;
+    'kn': Result := 50;
+    'si': Result := 51;
+    'my': Result := 52;
+    'km': Result := 53;
+    'lo': Result := 54;
+    'ka': Result := 55;
+    'hy': Result := 56;
+    'az': Result := 57;
+    'kk': Result := 58;
+    'ky': Result := 59;
+    'uz': Result := 60;
+    'mn': Result := 61;
+    'am': Result := 62;
+    'ne': Result := 63;
+    'sw': Result := 64;
+    'zu': Result := 65;
+    'xh': Result := 66;
+    'ht': Result := 67;
+    'fy': Result := 68;
+    'cy': Result := 69;
+    'gd': Result := 70;
+    'ga': Result := 71;
+    'eo': Result := 72;
+    'la': Result := 73;
+    'be': Result := 74;
+    'jv': Result := 75;
+    'su': Result := 76;
+    'tl': Result := 77;
+    'yo': Result := 78;
+    'ig': Result := 79;
+    'ha': Result := 80;
+    'so': Result := 81;
+    'om': Result := 82;
+    'mg': Result := 83;
+    'bs': Result := 84;
+    'mk': Result := 85;
+    'sq': Result := 86;
+    'is': Result := 87;
+    'ps': Result := 88;
+    'sd': Result := 89;
+    'ug': Result := 90;
+    'yi': Result := 91;
+    'gl': Result := 92;
+    'eu': Result := 93;
+    'ca': Result := 94;
+    'qu': Result := 95;
+    'gn': Result := 96;
+    'sc': Result := 97;
+    'sa': Result := 98;
+    'br': Result := 99;
+    'rm': Result := 100;
+    'ln': Result := 101;
+    'lg': Result := 102;
+    'ns': Result := 103;
+    'ss': Result := 104;
+    'tn': Result := 105;
+    'ff': Result := 106;
+    'wo': Result := 107;
+    'li': Result := 108;
+    'ku': Result := 109;
+    else
+      Result := 200;   // unknown languages get low priority
+  end;
+end;
+
 {%EndRegion}
 
 {%Region -fold Public Methods}
 
-//  Extract character trigrams from a UTF-8 text
-//  For texts dominated by CJK characters, spaces are ignored.
 function ExtractCharTrigrams(const AText: string): TStringArray;
 const
   CJK_SAMPLE_SIZE = 200;
@@ -768,6 +887,16 @@ begin
     end;
   end;
 
+  // For very short texts, if the two best distances are nearly equal,
+  // prefer a language with higher base frequency (lower Priority).
+  if (Length(AText) <= 15) and (bestIdx >= 0) and (secondIdx >= 0) then
+    if Abs(bestDist - secondDist) < 1.0 then
+      if Profiles[secondIdx].Priority < Profiles[bestIdx].Priority then
+      begin
+        bestIdx := secondIdx;
+        bestDist := secondDist;
+      end;
+
   // 4. Build result and confidence
   if bestIdx >= 0 then
   begin
@@ -797,7 +926,7 @@ end;
 // Internal routine that does the actual merge from any TStream
 procedure MergeProfilesFromStream(AStream: TStream);
 const
-  MAX_TRIGRAMS = 1000;
+  MAX_TRIGRAMS = 2000;
   MAGIC_COMPRESSED: cardinal = $4F525047; // 'GPRO' in little-endian
 var
   magic: cardinal;
@@ -857,6 +986,7 @@ begin
           if codeLen > 0 then
             plainStream.ReadBuffer(code[1], codeLen);
           fileProfiles[i].Code := code;
+          fileProfiles[i].Priority := GetLanguagePriority(code);
 
           trigCount := 0;
           plainStream.ReadBuffer(trigCount, SizeOf(trigCount));
@@ -896,6 +1026,7 @@ begin
       if codeLen > 0 then
         AStream.ReadBuffer(code[1], codeLen);
       fileProfiles[i].Code := code;
+      fileProfiles[i].Priority := GetLanguagePriority(code);
 
       trigCount := 0;
       AStream.ReadBuffer(trigCount, SizeOf(trigCount));
@@ -995,9 +1126,14 @@ end;
 var
   ExePath: string;
   ResStream: TResourceStream;
+  idx: integer;
 
 initialization
   InitDefaultProfiles;
+
+  // Set default priority for built‑in profiles: English gets 1, others 100
+  for idx := 0 to High(Profiles) do
+    Profiles[idx].Priority := GetLanguagePriority(Profiles[idx].Code);
 
   // Do not attempt to load external profiles when the language profile
   // generator (langprofiles) is running with the 'gen' command.
