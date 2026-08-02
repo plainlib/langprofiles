@@ -27,22 +27,11 @@ uses
   LazUTF8,
   osutils;
 
+  {%Region -fold Types}
+
 type
   TStringArray = array of string;
 
-//  Extract character trigrams from a UTF-8 text
-//  For texts dominated by CJK characters, spaces are ignored.
-function ExtractCharTrigrams(const AText: string): TStringArray;
-
-// Returns language code (e.g. 'en', 'ru') or 'unknown'
-function DetectLanguageForText(const AText: string): string;
-
-// Also returns a confidence value between 0.0 and 1.0
-function DetectLanguageWithConfidence(const AText: string; out Confidence: double): string;
-
-implementation
-
-type
   TProfile = record
     Code: string;
     Trigrams: TStringArray;   // sorted by frequency, most frequent first
@@ -50,10 +39,6 @@ type
     Priority: word;   // lower = more common, used for short texts tie-breaking
   end;
 
-var
-  Profiles: array of TProfile;
-
-type
   TScriptType = (
     stLatin,
     stCyrillic,
@@ -85,7 +70,24 @@ type
     Total: integer;
   end;
 
-  {%Region -fold Private Methods}
+var
+  Profiles: array of TProfile;
+
+  {%EndRegion}
+
+//  Extract character trigrams from a UTF-8 text
+//  For texts dominated by CJK characters, spaces are ignored.
+function ExtractCharTrigrams(const AText: string): TStringArray;
+
+// Returns language code (e.g. 'en', 'ru') or 'unknown'
+function DetectLanguageForText(const AText: string): string;
+
+// Also returns a confidence value between 0.0 and 1.0
+function DetectLanguageWithConfidence(const AText: string; out Confidence: double): string;
+
+implementation
+
+{%Region -fold Private Methods}
 
 // Analyse the script composition of the first 300 characters.
 // Returns detailed counts for Latin, Cyrillic, CJK sub‑ranges, etc.
@@ -370,176 +372,6 @@ begin
   end;
 end;
 
-// Post-correction for language pairs that trigrams alone have trouble separating.
-// Only fires when the current best guess belongs to one of the problematic pairs,
-// and then uses unique characters or high-frequency words to decide.
-procedure ApplyPostCorrection(var Code: string; var Confidence: double; const AText: string);
-begin
-  // Norwegian vs Danish vs Swedish
-  if (Code = 'no') or (Code = 'da') or (Code = 'sv') then
-  begin
-    // Unique letter for Swedish
-    if Pos('ä', AText) > 0 then
-    begin
-      Code := 'sv';
-      Confidence := 1.0;
-      Exit;
-    end;
-    // Danish/Norwegian have æ/ø, Swedish doesn't
-    if (Pos('æ', AText) > 0) or (Pos('ø', AText) > 0) then
-    begin
-      if Pos('dere', AText) > 0 then
-        Code := 'no'
-      else if Pos('af', AText) > 0 then
-        Code := 'da'
-      else if Pos('av', AText) > 0 then
-        Code := 'no';
-      Confidence := 1.0;
-      Exit;
-    end;
-    // Fallback to frequent words
-    if (Pos('och', AText) > 0) or (Pos('är', AText) > 0) or (Pos('inte', AText) > 0) then
-      Code := 'sv'
-    else if (Pos('seg', AText) > 0) or (Pos('dere', AText) > 0) then
-      Code := 'no'
-    else if (Pos('sig', AText) > 0) or (Pos('af', AText) > 0) then
-      Code := 'da';
-    Confidence := 1.0;
-    Exit;
-  end;
-
-  // Xhosa vs Zulu
-  if (Code = 'xh') or (Code = 'zu') then
-  begin
-    if Pos('xh', AText) > 0 then
-    begin
-      Code := 'xh';
-      Confidence := 1.0;
-      Exit;
-    end;
-    // If no 'xh', keep the trigram result (could be zu or xh)
-  end;
-
-  // Belarusian vs others (unique letter 'ў')
-  if (Code = 'be') or (Code = 'uk') or (Code = 'ru') then
-  begin
-    if (Pos('ў', AText) > 0) or (Pos('Ў', AText) > 0) then
-    begin
-      Code := 'be';
-      Confidence := 1.0;
-      Exit;
-    end;
-  end;
-
-  // Bulgarian vs Macedonian (both use 'ъ', but bg lacks 'ы','ё','э')
-  if (Code = 'bg') or (Code = 'mk') then
-  begin
-    if (Pos('ъ', AText) > 0) and (Pos('ы', AText) = 0) and (Pos('ё', AText) = 0) and (Pos('э', AText) = 0) then
-    begin
-      Code := 'bg';
-      Confidence := 1.0;
-      Exit;
-    end
-    else if (Pos('ѓ', AText) > 0) or (Pos('ќ', AText) > 0) then
-    begin
-      Code := 'mk';
-      Confidence := 1.0;
-      Exit;
-    end;
-  end;
-
-  // Ukrainian vs Russian
-  if (Code = 'uk') or (Code = 'ru') then
-  begin
-    if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or (Pos('ґ', AText) > 0) or (Pos('Ї', AText) > 0) or
-      (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
-    begin
-      Code := 'uk';
-      Confidence := 1.0;
-      Exit;
-    end;
-  end;
-
-  // Spanish vs Galician vs Portuguese
-  if (Code = 'es') or (Code = 'gl') or (Code = 'pt') then
-  begin
-    // Strong markers for Portuguese
-    if (Pos('ç', AText) > 0) or (Pos('ão', AText) > 0) then
-    begin
-      Code := 'pt';
-      Confidence := 1.0;
-      Exit;
-    end;
-    // Strong marker for Spanish: letter ñ
-    if Pos('ñ', AText) > 0 then
-    begin
-      Code := 'es';
-      Confidence := 1.0;
-      Exit;
-    end;
-    // Galician indicators – specific unique words
-    if (Pos('non', AText) > 0) or (Pos('galego', AText) > 0) or (Pos('nós', AText) > 0) or
-      (Pos('vós', AText) > 0) or (Pos('unha', AText) > 0) or (Pos('dúas', AText) > 0) then
-    begin
-      Code := 'gl';
-      Confidence := 1.0;
-      Exit;
-    end;
-    // Article-based heuristic: Galician uses "o"/"a" as definite articles,
-    // Spanish uses "el"/"la". Absence of Spanish articles and presence of
-    // "o" or "a" as separate words (with spaces) suggests Galician.
-    if (Pos(' o ', AText) > 0) or (Pos(' a ', AText) > 0) then
-    begin
-      if (Pos(' el ', AText) = 0) and (Pos(' la ', AText) = 0) and (Pos(' los ', AText) = 0) and (Pos(' las ', AText) = 0) then
-      begin
-        // No Spanish articles found, and no ñ – strong indication of Galician
-        Code := 'gl';
-        Confidence := 0.9;
-        Exit;
-      end
-      else
-      begin
-        // Spanish articles present – it's Spanish
-        Code := 'es';
-        Confidence := 0.9;
-        Exit;
-      end;
-    end;
-    // If no markers, keep the original trigram result (likely es)
-  end;
-
-  // Czech vs Slovak (very close, but Slovak has 'ä', 'ô', 'ŕ', 'ĺ')
-  if (Code = 'cs') or (Code = 'sk') then
-  begin
-    if (Pos('ä', AText) > 0) or (Pos('ô', AText) > 0) or (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) then
-    begin
-      Code := 'sk';
-      Confidence := 1.0;
-      Exit;
-    end
-    else if (Pos('ř', AText) > 0) or (Pos('ů', AText) > 0) then
-    begin
-      Code := 'cs';
-      Confidence := 1.0;
-      Exit;
-    end;
-  end;
-
-  // Chinese Simplified vs Traditional
-  if (Code = 'zh-CN') or (Code = 'zh-TW') then
-  begin
-    // If the text contains any Traditional-only character, it's zh-TW
-    // Very few unique ones can be checked quickly
-    if (Pos('國', AText) > 0) or (Pos('體', AText) > 0) or (Pos('門', AText) > 0) or (Pos('機', AText) > 0) or
-      (Pos('關', AText) > 0) then  // high-freq trad chars
-    begin
-      Code := 'zh-TW';
-      Confidence := 1.0;
-      Exit;
-    end;
-  end;
-end;
-
 // Returns a priority value for a language code.
 // Lower value = more widely spoken / higher base frequency.
 // Used for tie‑breaking on very short texts.
@@ -660,12 +492,347 @@ begin
   end;
 end;
 
+// Post-correction for language pairs that trigrams alone have trouble separating.
+// Only fires when the current best guess belongs to one of the problematic pairs,
+// and then uses unique characters or high-frequency words to decide.
+procedure ApplyPostCorrection(var Code: string; var Confidence: double; const AText: string);
+begin
+  // Norwegian vs Danish vs Swedish
+  if (Code = 'no') or (Code = 'da') or (Code = 'sv') then
+  begin
+    // Unique letter for Swedish
+    if Pos('ä', AText) > 0 then
+    begin
+      Code := 'sv';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Danish/Norwegian have æ/ø, Swedish doesn't
+    if (Pos('æ', AText) > 0) or (Pos('ø', AText) > 0) then
+    begin
+      if Pos('dere', AText) > 0 then
+        Code := 'no'
+      else if Pos('af', AText) > 0 then
+        Code := 'da'
+      else if Pos('av', AText) > 0 then
+        Code := 'no';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Fallback to frequent words
+    if (Pos('och', AText) > 0) or (Pos('är', AText) > 0) or (Pos('inte', AText) > 0) then
+      Code := 'sv'
+    else if (Pos('seg', AText) > 0) or (Pos('dere', AText) > 0) then
+      Code := 'no'
+    else if (Pos('sig', AText) > 0) or (Pos('af', AText) > 0) then
+      Code := 'da';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Xhosa vs Zulu
+  if (Code = 'xh') or (Code = 'zu') then
+  begin
+    if Pos('xh', AText) > 0 then
+    begin
+      Code := 'xh';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // If no 'xh', keep the trigram result (could be zu or xh)
+  end;
+
+  // Belarusian / Ukrainian / Russian (Cyrillic group)
+  if (Code = 'be') or (Code = 'uk') or (Code = 'ru') then
+  begin
+    // Belarusian unique letter
+    if (Pos('ў', AText) > 0) or (Pos('Ў', AText) > 0) then
+    begin
+      Code := 'be';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Ukrainian unique letters
+    if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or (Pos('ґ', AText) > 0) or (Pos('Ї', AText) > 0) or
+      (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
+    begin
+      Code := 'uk';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Letter 'i' (U+0456 / U+0406) is absent in Russian, present in Belarusian and Ukrainian
+    if (Pos('і', AText) > 0) or (Pos('І', AText) > 0) then
+    begin
+      // Distinguish by presence of 'ы' (Belarusian has it, Ukrainian does not)
+      if (Pos('ы', AText) > 0) or (Pos('Ы', AText) > 0) then
+        Code := 'be'
+      else
+        Code := 'uk';
+      Confidence := 1.0;
+      Exit;
+    end;
+  end;
+
+  // Bulgarian vs Macedonian (both use 'ъ', but bg lacks 'ы','ё','э')
+  if (Code = 'bg') or (Code = 'mk') then
+  begin
+    if (Pos('ъ', AText) > 0) and (Pos('ы', AText) = 0) and (Pos('ё', AText) = 0) and (Pos('э', AText) = 0) then
+    begin
+      Code := 'bg';
+      Confidence := 1.0;
+      Exit;
+    end
+    else if (Pos('ѓ', AText) > 0) or (Pos('ќ', AText) > 0) then
+    begin
+      Code := 'mk';
+      Confidence := 1.0;
+      Exit;
+    end;
+  end;
+
+  // Spanish vs Galician vs Portuguese
+  if (Code = 'es') or (Code = 'gl') or (Code = 'pt') then
+  begin
+    // Strong markers for Portuguese
+    if (Pos('ç', AText) > 0) or (Pos('ão', AText) > 0) then
+    begin
+      Code := 'pt';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Strong marker for Spanish: letter ñ
+    if Pos('ñ', AText) > 0 then
+    begin
+      Code := 'es';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Galician indicators – specific unique words
+    if (Pos('non', AText) > 0) or (Pos('galego', AText) > 0) or (Pos('nós', AText) > 0) or (Pos('vós', AText) > 0) or
+      (Pos('unha', AText) > 0) or (Pos('dúas', AText) > 0) then
+    begin
+      Code := 'gl';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Article-based heuristic: Galician uses "o"/"a" as definite articles,
+    // Spanish uses "el"/"la". Absence of Spanish articles and presence of
+    // "o" or "a" as separate words (with spaces) suggests Galician.
+    if (Pos(' o ', AText) > 0) or (Pos(' a ', AText) > 0) then
+    begin
+      if (Pos(' el ', AText) = 0) and (Pos(' la ', AText) = 0) and (Pos(' los ', AText) = 0) and (Pos(' las ', AText) = 0) then
+      begin
+        Code := 'gl';
+        Confidence := 0.9;
+        Exit;
+      end
+      else
+      begin
+        Code := 'es';
+        Confidence := 0.9;
+        Exit;
+      end;
+    end;
+    // If no markers, keep the original trigram result (likely es)
+  end;
+
+  // Czech vs Slovak (very close, but Slovak has 'ä', 'ô', 'ŕ', 'ĺ')
+  if (Code = 'cs') or (Code = 'sk') then
+  begin
+    if (Pos('ä', AText) > 0) or (Pos('ô', AText) > 0) or (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) then
+    begin
+      Code := 'sk';
+      Confidence := 1.0;
+      Exit;
+    end
+    else if (Pos('ř', AText) > 0) or (Pos('ů', AText) > 0) then
+    begin
+      Code := 'cs';
+      Confidence := 1.0;
+      Exit;
+    end;
+  end;
+
+  // Chinese Simplified vs Traditional
+  if (Code = 'zh-CN') or (Code = 'zh-TW') then
+  begin
+    // If the text contains any Traditional-only character, it's zh-TW
+    // Very few unique ones can be checked quickly
+    if (Pos('國', AText) > 0) or (Pos('體', AText) > 0) or (Pos('門', AText) > 0) or (Pos('機', AText) > 0) or
+      (Pos('關', AText) > 0) then  // high-freq trad chars
+    begin
+      Code := 'zh-TW';
+      Confidence := 1.0;
+      Exit;
+    end;
+  end;
+end;
+
+// Special correction for very short texts (< SHORT_TEXT_THRESHOLD chars).
+// Uses unique characters to override the priority-based guess.
+// Called only from the short text branch, does not depend on current Code.
+procedure ApplyShortTextCorrection(var Code: string; var Confidence: double; const AText: string);
+begin
+  // Polish: unique letters
+  if (Pos('ą', AText) > 0) or (Pos('ć', AText) > 0) or (Pos('ę', AText) > 0) or (Pos('ł', AText) > 0) or
+    (Pos('ń', AText) > 0) or (Pos('ó', AText) > 0) or (Pos('ś', AText) > 0) or (Pos('ź', AText) > 0) or (Pos('ż', AText) > 0) then
+  begin
+    Code := 'pl';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Turkish: unique letters (ğ, ı, İ, ş)
+  if (Pos('ğ', AText) > 0) or (Pos('ı', AText) > 0) or (Pos('İ', AText) > 0) or (Pos('ş', AText) > 0) then
+  begin
+    Code := 'tr';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Hungarian: ő and ű are exclusive
+  if (Pos('ő', AText) > 0) or (Pos('ű', AText) > 0) then
+  begin
+    Code := 'hu';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Scandinavian: å is Swedish; æ/ø are Danish/Norwegian
+  if (Pos('å', AText) > 0) then
+  begin
+    Code := 'sv';
+    Confidence := 1.0;
+    Exit;
+  end;
+  if (Pos('æ', AText) > 0) or (Pos('ø', AText) > 0) then
+  begin
+    if Pos('af', AText) > 0 then
+      Code := 'da'
+    else if Pos('av', AText) > 0 then
+      Code := 'no'
+    else
+      Code := 'da'; // default for Nordic
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Spanish: ñ is exclusive
+  if Pos('ñ', AText) > 0 then
+  begin
+    Code := 'es';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Portuguese: ã and õ
+  if (Pos('ã', AText) > 0) or (Pos('õ', AText) > 0) then
+  begin
+    Code := 'pt';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // French: wide range of accented characters
+  if (Pos('é', AText) > 0) or (Pos('è', AText) > 0) or (Pos('ê', AText) > 0) or (Pos('ë', AText) > 0) or
+    (Pos('à', AText) > 0) or (Pos('â', AText) > 0) or (Pos('ù', AText) > 0) or (Pos('û', AText) > 0) or
+    (Pos('ç', AText) > 0) or (Pos('œ', AText) > 0) or (Pos('æ', AText) > 0) then
+  begin
+    Code := 'fr';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Italian: ì and ò
+  if (Pos('ì', AText) > 0) or (Pos('ò', AText) > 0) then
+  begin
+    Code := 'it';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Czech: ů, ř
+  if (Pos('ů', AText) > 0) or (Pos('ř', AText) > 0) then
+  begin
+    Code := 'cs';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Slovak: ô, ŕ, ĺ
+  if (Pos('ô', AText) > 0) or (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) then
+  begin
+    Code := 'sk';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Romanian: ă, ș, ț
+  if (Pos('ă', AText) > 0) or (Pos('ș', AText) > 0) or (Pos('ț', AText) > 0) then
+  begin
+    Code := 'ro';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // If none of the above but contains umlauts or eszett, default to German
+  if (Pos('ä', AText) > 0) or (Pos('ö', AText) > 0) or (Pos('ü', AText) > 0) or (Pos('ß', AText) > 0) then
+  begin
+    Code := 'de';
+    Confidence := 0.95;
+    Exit;
+  end;
+
+  // Cyrillic special handling for very short texts
+  // Belarusian / Ukrainian / Russian
+  if (Code = 'be') or (Code = 'uk') or (Code = 'ru') then
+  begin
+    if (Pos('ў', AText) > 0) or (Pos('Ў', AText) > 0) then
+    begin
+      Code := 'be';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or (Pos('ґ', AText) > 0) or (Pos('Ї', AText) > 0) or
+      (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
+    begin
+      Code := 'uk';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if (Pos('і', AText) > 0) or (Pos('І', AText) > 0) then
+    begin
+      if (Pos('ы', AText) > 0) or (Pos('Ы', AText) > 0) then
+        Code := 'be'
+      else
+        Code := 'uk';
+      Confidence := 1.0;
+      Exit;
+    end;
+  end;
+
+  // Bulgarian vs Macedonian
+  if (Code = 'bg') or (Code = 'mk') then
+  begin
+    if (Pos('ъ', AText) > 0) and (Pos('ы', AText) = 0) and (Pos('ё', AText) = 0) and (Pos('э', AText) = 0) then
+    begin
+      Code := 'bg';
+      Confidence := 1.0;
+      Exit;
+    end
+    else if (Pos('ѓ', AText) > 0) or (Pos('ќ', AText) > 0) then
+    begin
+      Code := 'mk';
+      Confidence := 1.0;
+      Exit;
+    end;
+  end;
+end;
+
 {%EndRegion}
 
 {%Region -fold Public Methods}
 
-//  Extract character trigrams from a UTF-8 text
-//  For texts dominated by CJK characters, spaces are ignored.
 function ExtractCharTrigrams(const AText: string): TStringArray;
 const
   CJK_SAMPLE_SIZE = 200;
@@ -766,12 +933,15 @@ begin
 end;
 
 function DetectLanguageWithConfidence(const AText: string; out Confidence: double): string;
+const
+  SHORT_TEXT_THRESHOLD = 20; // characters, below this trigrams are too noisy
 var
   textTrigrams: TStringArray;
   i, bestIdx, secondIdx: integer;
   bestDist, secondDist, currentDist: double;
   ScriptInfo: TScriptInfo;
   Script: TScriptType = stOther;
+  bestPriority: word;
 
   function IsCJKCodeAllowed(const Code: string): boolean;
   begin
@@ -791,6 +961,48 @@ begin
   // 1. Quick script detection + CJK refinement
   Result := QuickScriptDetection(AText, ScriptInfo, Script, Confidence);
   if Result <> '' then Exit;
+
+  // Very short text: script and priority instead of trigrams
+  if UTF8Length(AText) <= SHORT_TEXT_THRESHOLD then
+  begin
+    bestIdx := -1;
+    bestPriority := High(word);
+    for i := 0 to High(Profiles) do
+    begin
+      if IsLanguageMatchingScript(Profiles[i].Code, Script) then
+      begin
+        if Profiles[i].Priority < bestPriority then
+        begin
+          bestPriority := Profiles[i].Priority;
+          bestIdx := i;
+        end;
+      end;
+    end;
+
+    // Fallback: no script match – take globally highest priority profile
+    if bestIdx < 0 then
+    begin
+      bestIdx := 0;
+      for i := 1 to High(Profiles) do
+        if Profiles[i].Priority < Profiles[bestIdx].Priority then
+          bestIdx := i;
+    end;
+
+    if bestIdx >= 0 then
+    begin
+      Result := Profiles[bestIdx].Code;
+      Confidence := 0.7; // moderate confidence for very short text
+    end
+    else
+    begin
+      Result := 'unknown';
+      Confidence := 0.0;
+    end;
+
+    // Apply short-text specific character-based correction
+    ApplyShortTextCorrection(Result, Confidence, AText);
+    Exit;
+  end;
 
   // 2. Extract trigrams
   textTrigrams := ExtractCharTrigrams(AText);
@@ -853,10 +1065,10 @@ begin
     end;
   end;
 
-  // For very short texts, if the two best distances are nearly equal,
+  // For shorter texts, if the two best distances are close,
   // prefer a language with higher base frequency (lower Priority).
-  if (Length(AText) <= 15) and (bestIdx >= 0) and (secondIdx >= 0) then
-    if Abs(bestDist - secondDist) < 1.0 then
+  if (UTF8Length(AText) <= 40) and (bestIdx >= 0) and (secondIdx >= 0) then
+    if (bestDist > 0) and (secondDist > 0) and (secondDist < bestDist * 1.1) then
       if Profiles[secondIdx].Priority < Profiles[bestIdx].Priority then
       begin
         bestIdx := secondIdx;
