@@ -492,97 +492,133 @@ begin
   end;
 end;
 
-// Post-correction for language pairs that trigrams alone have trouble separating.
+// Post-correction for language pairs that trigrams alone have trouble separating
 // Only fires when the current best guess belongs to one of the problematic pairs,
-// and then uses unique characters or high-frequency words to decide.
+// and then uses unique characters or high-frequency words to decide
 procedure ApplyPostCorrection(var Code: string; var Confidence: double; const AText: string);
 begin
   // Norwegian vs Danish vs Swedish
   if (Code = 'no') or (Code = 'da') or (Code = 'sv') then
   begin
-    // Unique letter for Swedish
-    if Pos('ä', AText) > 0 then
+    // Swedish has unique letters
+    if (Pos('ä', AText) > 0) or (Pos('ö', AText) > 0) then
     begin
       Code := 'sv';
       Confidence := 1.0;
       Exit;
     end;
-    // Danish/Norwegian have æ/ø, Swedish doesn't
-    if (Pos('æ', AText) > 0) or (Pos('ø', AText) > 0) then
+
+    // Strong Norwegian markers
+    if (Pos(' ikkje ', AText) > 0) or
+       (Pos(' meg ', AText) > 0) or
+       (Pos(' deg ', AText) > 0) or
+       (Pos(' dere ', AText) > 0) or
+       (Pos(' av ', AText) > 0) or
+       (Pos(' bruker ', AText) > 0) then
     begin
-      if Pos('dere', AText) > 0 then
-        Code := 'no'
-      else if Pos('af', AText) > 0 then
-        Code := 'da'
-      else if Pos('av', AText) > 0 then
-        Code := 'no';
+      Code := 'no';
       Confidence := 1.0;
       Exit;
     end;
-    // Fallback to frequent words
-    if (Pos('och', AText) > 0) or (Pos('är', AText) > 0) or (Pos('inte', AText) > 0) then
-      Code := 'sv'
-    else if (Pos('seg', AText) > 0) or (Pos('dere', AText) > 0) then
-      Code := 'no'
-    else if (Pos('sig', AText) > 0) or (Pos('af', AText) > 0) then
+
+    // Strong Danish markers
+    if (Pos(' mig ', AText) > 0) or
+       (Pos(' dig ', AText) > 0) or
+       (Pos(' jer ', AText) > 0) or
+       (Pos(' af ', AText) > 0) or
+       (Pos(' bruger ', AText) > 0) then
+    begin
       Code := 'da';
-    Confidence := 1.0;
-    Exit;
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Swedish words
+    if (Pos(' och ', AText) > 0) or
+       (Pos(' är ', AText) > 0) or
+       (Pos(' inte ', AText) > 0) then
+    begin
+      Code := 'sv';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Norwegian fallback
+    if (Pos(' ikke ', AText) > 0) or
+       (Pos(' seg ', AText) > 0) then
+    begin
+      Code := 'no';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Danish fallback
+    if (Pos(' sig ', AText) > 0) then
+    begin
+      Code := 'da';
+      Confidence := 1.0;
+      Exit;
+    end;
   end;
 
   // Xhosa vs Zulu
   if (Code = 'xh') or (Code = 'zu') then
   begin
-    if Pos('xh', AText) > 0 then
+    if (Pos(' xh ', AText) > 0) or
+       (Pos(' kwaye ', AText) > 0) or
+       (Pos(' umntu ', AText) > 0) then
     begin
       Code := 'xh';
       Confidence := 1.0;
       Exit;
     end;
-    // If no 'xh', keep the trigram result (could be zu or xh)
   end;
 
   // Belarusian / Ukrainian / Russian (Cyrillic group)
   if (Code = 'be') or (Code = 'uk') or (Code = 'ru') then
   begin
-    // Belarusian unique letter
     if (Pos('ў', AText) > 0) or (Pos('Ў', AText) > 0) then
     begin
       Code := 'be';
       Confidence := 1.0;
       Exit;
     end;
-    // Ukrainian unique letters
-    if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or (Pos('ґ', AText) > 0) or (Pos('Ї', AText) > 0) or
-      (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
+
+    if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or
+       (Pos('ґ', AText) > 0) or (Pos('Ї', AText) > 0) or
+       (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
     begin
       Code := 'uk';
       Confidence := 1.0;
       Exit;
     end;
-    // Letter 'i' (U+0456 / U+0406) is absent in Russian, present in Belarusian and Ukrainian
+
     if (Pos('і', AText) > 0) or (Pos('І', AText) > 0) then
     begin
-      // Distinguish by presence of 'ы' (Belarusian has it, Ukrainian does not)
       if (Pos('ы', AText) > 0) or (Pos('Ы', AText) > 0) then
         Code := 'be'
       else
         Code := 'uk';
+
       Confidence := 1.0;
       Exit;
     end;
   end;
 
-  // Bulgarian vs Macedonian (both use 'ъ', but bg lacks 'ы','ё','э')
+  // Bulgarian vs Macedonian
   if (Code = 'bg') or (Code = 'mk') then
   begin
-    if (Pos('ъ', AText) > 0) and (Pos('ы', AText) = 0) and (Pos('ё', AText) = 0) and (Pos('э', AText) = 0) then
+    if (Pos('ъ', AText) > 0) and
+       (Pos('ы', AText) = 0) and
+       (Pos('ё', AText) = 0) and
+       (Pos('э', AText) = 0) then
     begin
       Code := 'bg';
       Confidence := 1.0;
       Exit;
     end
-    else if (Pos('ѓ', AText) > 0) or (Pos('ќ', AText) > 0) then
+    else if (Pos('ѓ', AText) > 0) or
+            (Pos('ќ', AText) > 0) then
     begin
       Code := 'mk';
       Confidence := 1.0;
@@ -593,59 +629,57 @@ begin
   // Spanish vs Galician vs Portuguese
   if (Code = 'es') or (Code = 'gl') or (Code = 'pt') then
   begin
-    // Strong markers for Portuguese
-    if (Pos('ç', AText) > 0) or (Pos('ão', AText) > 0) then
+    // Portuguese
+    if (Pos('ç', AText) > 0) or
+       (Pos('ão', AText) > 0) or
+       (Pos('ção', AText) > 0) or
+       (Pos('ções', AText) > 0) then
     begin
       Code := 'pt';
       Confidence := 1.0;
       Exit;
     end;
-    // Strong marker for Spanish: letter ñ
-    if Pos('ñ', AText) > 0 then
-    begin
-      Code := 'es';
-      Confidence := 1.0;
-      Exit;
-    end;
-    // Galician indicators – specific unique words
-    if (Pos('non', AText) > 0) or (Pos('galego', AText) > 0) or (Pos('nós', AText) > 0) or (Pos('vós', AText) > 0) or
-      (Pos('unha', AText) > 0) or (Pos('dúas', AText) > 0) then
+
+    // Galician
+    if (Pos(' non ', AText) > 0) or
+       (Pos(' galego ', AText) > 0) or
+       (Pos(' nós ', AText) > 0) or
+       (Pos(' vós ', AText) > 0) or
+       (Pos(' unha ', AText) > 0) or
+       (Pos(' dúas ', AText) > 0) or
+       (Pos(' ao ', AText) > 0) or
+       (Pos(' coa ', AText) > 0) then
     begin
       Code := 'gl';
       Confidence := 1.0;
       Exit;
     end;
-    // Article-based heuristic: Galician uses "o"/"a" as definite articles,
-    // Spanish uses "el"/"la". Absence of Spanish articles and presence of
-    // "o" or "a" as separate words (with spaces) suggests Galician.
-    if (Pos(' o ', AText) > 0) or (Pos(' a ', AText) > 0) then
+
+    // Spanish
+    if (Pos('ñ', AText) > 0) or
+       (Pos('¿', AText) > 0) or
+       (Pos('¡', AText) > 0) then
     begin
-      if (Pos(' el ', AText) = 0) and (Pos(' la ', AText) = 0) and (Pos(' los ', AText) = 0) and (Pos(' las ', AText) = 0) then
-      begin
-        Code := 'gl';
-        Confidence := 0.9;
-        Exit;
-      end
-      else
-      begin
-        Code := 'es';
-        Confidence := 0.9;
-        Exit;
-      end;
+      Code := 'es';
+      Confidence := 1.0;
+      Exit;
     end;
-    // If no markers, keep the original trigram result (likely es)
   end;
 
-  // Czech vs Slovak (very close, but Slovak has 'ä', 'ô', 'ŕ', 'ĺ')
+  // Czech vs Slovak
   if (Code = 'cs') or (Code = 'sk') then
   begin
-    if (Pos('ä', AText) > 0) or (Pos('ô', AText) > 0) or (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) then
+    if (Pos('ä', AText) > 0) or
+       (Pos('ô', AText) > 0) or
+       (Pos('ŕ', AText) > 0) or
+       (Pos('ĺ', AText) > 0) then
     begin
       Code := 'sk';
       Confidence := 1.0;
       Exit;
     end
-    else if (Pos('ř', AText) > 0) or (Pos('ů', AText) > 0) then
+    else if (Pos('ř', AText) > 0) or
+            (Pos('ů', AText) > 0) then
     begin
       Code := 'cs';
       Confidence := 1.0;
@@ -656,10 +690,11 @@ begin
   // Chinese Simplified vs Traditional
   if (Code = 'zh-CN') or (Code = 'zh-TW') then
   begin
-    // If the text contains any Traditional-only character, it's zh-TW
-    // Very few unique ones can be checked quickly
-    if (Pos('國', AText) > 0) or (Pos('體', AText) > 0) or (Pos('門', AText) > 0) or (Pos('機', AText) > 0) or
-      (Pos('關', AText) > 0) then  // high-freq trad chars
+    if (Pos('國', AText) > 0) or
+       (Pos('體', AText) > 0) or
+       (Pos('門', AText) > 0) or
+       (Pos('機', AText) > 0) or
+       (Pos('關', AText) > 0) then
     begin
       Code := 'zh-TW';
       Confidence := 1.0;
@@ -672,24 +707,27 @@ end;
 // Uses unique characters to override the priority guess for many languages
 procedure ApplyShortTextCorrection(var Code: string; var Confidence: double; const AText: string);
 var
-  HasAeOe, HasAa, HasUmlaut, HasI, HasY, HasHardSign, HasRus: Boolean;
+  HasAeOe, HasAa, HasUmlaut, HasI, HasY, HasHardSign, HasRus: boolean;
 begin
   // Asian scripts based on highly frequent characters
-  if (Pos('の', AText) > 0) or (Pos('に', AText) > 0) or (Pos('は', AText) > 0) or (Pos('を', AText) > 0) or (Pos('だ', AText) > 0) then
+  if (Pos('の', AText) > 0) or (Pos('に', AText) > 0) or (Pos('は', AText) > 0) or (Pos('を', AText) > 0) or
+    (Pos('だ', AText) > 0) then
   begin
     Code := 'ja';
     Confidence := 1.0;
     Exit;
   end;
 
-  if (Pos('다', AText) > 0) or (Pos('요', AText) > 0) or (Pos('는', AText) > 0) or (Pos('이', AText) > 0) or (Pos('가', AText) > 0) then
+  if (Pos('다', AText) > 0) or (Pos('요', AText) > 0) or (Pos('는', AText) > 0) or (Pos('이', AText) > 0) or
+    (Pos('가', AText) > 0) then
   begin
     Code := 'ko';
     Confidence := 1.0;
     Exit;
   end;
 
-  if (Pos('的', AText) > 0) or (Pos('是', AText) > 0) or (Pos('我', AText) > 0) or (Pos('不', AText) > 0) or (Pos('在', AText) > 0) then
+  if (Pos('的', AText) > 0) or (Pos('是', AText) > 0) or (Pos('我', AText) > 0) or (Pos('不', AText) > 0) or
+    (Pos('在', AText) > 0) then
   begin
     Code := 'zh-CN';
     Confidence := 1.0;
@@ -753,8 +791,9 @@ begin
   end;
 
   // Esperanto unique letters
-  if (Pos('ĉ', AText) > 0) or (Pos('ĝ', AText) > 0) or (Pos('ĥ', AText) > 0) or (Pos('ĵ', AText) > 0) or (Pos('ŝ', AText) > 0) or (Pos('ŭ', AText) > 0) or
-     (Pos('Ĉ', AText) > 0) or (Pos('Ĝ', AText) > 0) or (Pos('Ĥ', AText) > 0) or (Pos('Ĵ', AText) > 0) or (Pos('Ŝ', AText) > 0) or (Pos('Ŭ', AText) > 0) then
+  if (Pos('ĉ', AText) > 0) or (Pos('ĝ', AText) > 0) or (Pos('ĥ', AText) > 0) or (Pos('ĵ', AText) > 0) or
+    (Pos('ŝ', AText) > 0) or (Pos('ŭ', AText) > 0) or (Pos('Ĉ', AText) > 0) or (Pos('Ĝ', AText) > 0) or
+    (Pos('Ĥ', AText) > 0) or (Pos('Ĵ', AText) > 0) or (Pos('Ŝ', AText) > 0) or (Pos('Ŭ', AText) > 0) then
   begin
     Code := 'eo';
     Confidence := 1.0;
@@ -771,8 +810,8 @@ begin
 
   // Latvian specific letters
   if (Pos('ā', AText) > 0) or (Pos('ē', AText) > 0) or (Pos('ī', AText) > 0) or (Pos('ū', AText) > 0) or
-     (Pos('ģ', AText) > 0) or (Pos('ķ', AText) > 0) or (Pos('ļ', AText) > 0) or (Pos('ņ', AText) > 0) or
-     (Pos('Ā', AText) > 0) or (Pos('Ē', AText) > 0) or (Pos('Ī', AText) > 0) or (Pos('Ū', AText) > 0) then
+    (Pos('ģ', AText) > 0) or (Pos('ķ', AText) > 0) or (Pos('ļ', AText) > 0) or (Pos('ņ', AText) > 0) or
+    (Pos('Ā', AText) > 0) or (Pos('Ē', AText) > 0) or (Pos('Ī', AText) > 0) or (Pos('Ū', AText) > 0) then
   begin
     Code := 'lv';
     Confidence := 1.0;
@@ -780,8 +819,8 @@ begin
   end;
 
   // Lithuanian specific letters
-  if (Pos('ė', AText) > 0) or (Pos('į', AText) > 0) or (Pos('ų', AText) > 0) or
-     (Pos('Ė', AText) > 0) or (Pos('Į', AText) > 0) or (Pos('Ų', AText) > 0) then
+  if (Pos('ė', AText) > 0) or (Pos('į', AText) > 0) or (Pos('ų', AText) > 0) or (Pos('Ė', AText) > 0) or
+    (Pos('Į', AText) > 0) or (Pos('Ų', AText) > 0) then
   begin
     Code := 'lt';
     Confidence := 1.0;
@@ -790,9 +829,10 @@ begin
 
   // Polish unique letters
   if (Pos('ą', AText) > 0) or (Pos('ć', AText) > 0) or (Pos('ę', AText) > 0) or (Pos('ł', AText) > 0) or
-     (Pos('ń', AText) > 0) or (Pos('ó', AText) > 0) or (Pos('ś', AText) > 0) or (Pos('ź', AText) > 0) or (Pos('ż', AText) > 0) or
-     (Pos('Ą', AText) > 0) or (Pos('Ć', AText) > 0) or (Pos('Ę', AText) > 0) or (Pos('Ł', AText) > 0) or
-     (Pos('Ń', AText) > 0) or (Pos('Ó', AText) > 0) or (Pos('Ś', AText) > 0) or (Pos('Ź', AText) > 0) or (Pos('Ż', AText) > 0) then
+    (Pos('ń', AText) > 0) or (Pos('ó', AText) > 0) or (Pos('ś', AText) > 0) or (Pos('ź', AText) > 0) or
+    (Pos('ż', AText) > 0) or (Pos('Ą', AText) > 0) or (Pos('Ć', AText) > 0) or (Pos('Ę', AText) > 0) or
+    (Pos('Ł', AText) > 0) or (Pos('Ń', AText) > 0) or (Pos('Ó', AText) > 0) or (Pos('Ś', AText) > 0) or
+    (Pos('Ź', AText) > 0) or (Pos('Ż', AText) > 0) then
   begin
     Code := 'pl';
     Confidence := 1.0;
@@ -801,7 +841,7 @@ begin
 
   // Turkish unique letters
   if (Pos('ğ', AText) > 0) or (Pos('ı', AText) > 0) or (Pos('İ', AText) > 0) or (Pos('ş', AText) > 0) or
-     (Pos('Ğ', AText) > 0) or (Pos('Ş', AText) > 0) then
+    (Pos('Ğ', AText) > 0) or (Pos('Ş', AText) > 0) then
   begin
     Code := 'tr';
     Confidence := 1.0;
@@ -825,8 +865,8 @@ begin
   end;
 
   // Romanian letters
-  if (Pos('ă', AText) > 0) or (Pos('ș', AText) > 0) or (Pos('ț', AText) > 0) or
-     (Pos('Ă', AText) > 0) or (Pos('Ș', AText) > 0) or (Pos('Ț', AText) > 0) then
+  if (Pos('ă', AText) > 0) or (Pos('ș', AText) > 0) or (Pos('ț', AText) > 0) or (Pos('Ă', AText) > 0) or
+    (Pos('Ș', AText) > 0) or (Pos('Ț', AText) > 0) then
   begin
     Code := 'ro';
     Confidence := 1.0;
@@ -834,8 +874,8 @@ begin
   end;
 
   // Czech letters
-  if (Pos('ř', AText) > 0) or (Pos('ů', AText) > 0) or (Pos('ě', AText) > 0) or
-     (Pos('Ř', AText) > 0) or (Pos('Ů', AText) > 0) or (Pos('Ě', AText) > 0) then
+  if (Pos('ř', AText) > 0) or (Pos('ů', AText) > 0) or (Pos('ě', AText) > 0) or (Pos('Ř', AText) > 0) or
+    (Pos('Ů', AText) > 0) or (Pos('Ě', AText) > 0) then
   begin
     Code := 'cs';
     Confidence := 1.0;
@@ -843,8 +883,8 @@ begin
   end;
 
   // Slovak letters
-  if (Pos('ô', AText) > 0) or (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) or
-     (Pos('Ô', AText) > 0) or (Pos('Ŕ', AText) > 0) or (Pos('Ĺ', AText) > 0) then
+  if (Pos('ô', AText) > 0) or (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) or (Pos('Ô', AText) > 0) or
+    (Pos('Ŕ', AText) > 0) or (Pos('Ĺ', AText) > 0) then
   begin
     Code := 'sk';
     Confidence := 1.0;
@@ -852,8 +892,7 @@ begin
   end;
 
   // Icelandic letters
-  if (Pos('þ', AText) > 0) or (Pos('ð', AText) > 0) or
-     (Pos('Þ', AText) > 0) or (Pos('Ð', AText) > 0) then
+  if (Pos('þ', AText) > 0) or (Pos('ð', AText) > 0) or (Pos('Þ', AText) > 0) or (Pos('Ð', AText) > 0) then
   begin
     Code := 'is';
     Confidence := 1.0;
@@ -861,8 +900,8 @@ begin
   end;
 
   // Vietnamese letters
-  if (Pos('đ', AText) > 0) or (Pos('ơ', AText) > 0) or (Pos('ư', AText) > 0) or
-     (Pos('Đ', AText) > 0) or (Pos('Ơ', AText) > 0) or (Pos('Ư', AText) > 0) then
+  if (Pos('đ', AText) > 0) or (Pos('ơ', AText) > 0) or (Pos('ư', AText) > 0) or (Pos('Đ', AText) > 0) or
+    (Pos('Ơ', AText) > 0) or (Pos('Ư', AText) > 0) then
   begin
     Code := 'vi';
     Confidence := 1.0;
@@ -870,8 +909,7 @@ begin
   end;
 
   // Portuguese letters
-  if (Pos('ã', AText) > 0) or (Pos('õ', AText) > 0) or
-     (Pos('Ã', AText) > 0) or (Pos('Õ', AText) > 0) then
+  if (Pos('ã', AText) > 0) or (Pos('õ', AText) > 0) or (Pos('Ã', AText) > 0) or (Pos('Õ', AText) > 0) then
   begin
     Code := 'pt';
     Confidence := 1.0;
@@ -895,8 +933,8 @@ begin
   end;
 
   // Ukrainian letters
-  if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or (Pos('ґ', AText) > 0) or
-     (Pos('Ї', AText) > 0) or (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
+  if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or (Pos('ґ', AText) > 0) or (Pos('Ї', AText) > 0) or
+    (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
   begin
     Code := 'uk';
     Confidence := 1.0;
@@ -912,8 +950,9 @@ begin
   end;
 
   // Kazakh letters
-  if (Pos('ғ', AText) > 0) or (Pos('қ', AText) > 0) or (Pos('ң', AText) > 0) or (Pos('ұ', AText) > 0) or (Pos('һ', AText) > 0) or
-     (Pos('Ғ', AText) > 0) or (Pos('Қ', AText) > 0) or (Pos('Ң', AText) > 0) or (Pos('Ұ', AText) > 0) or (Pos('Һ', AText) > 0) then
+  if (Pos('ғ', AText) > 0) or (Pos('қ', AText) > 0) or (Pos('ң', AText) > 0) or (Pos('ұ', AText) > 0) or
+    (Pos('һ', AText) > 0) or (Pos('Ғ', AText) > 0) or (Pos('Қ', AText) > 0) or (Pos('Ң', AText) > 0) or
+    (Pos('Ұ', AText) > 0) or (Pos('Һ', AText) > 0) then
   begin
     Code := 'kk';
     Confidence := 1.0;
@@ -921,8 +960,8 @@ begin
   end;
 
   // Macedonian letters
-  if (Pos('ѓ', AText) > 0) or (Pos('ќ', AText) > 0) or (Pos('ѕ', AText) > 0) or
-     (Pos('Ѓ', AText) > 0) or (Pos('Ќ', AText) > 0) or (Pos('Ѕ', AText) > 0) then
+  if (Pos('ѓ', AText) > 0) or (Pos('ќ', AText) > 0) or (Pos('ѕ', AText) > 0) or (Pos('Ѓ', AText) > 0) or
+    (Pos('Ќ', AText) > 0) or (Pos('Ѕ', AText) > 0) then
   begin
     Code := 'mk';
     Confidence := 1.0;
@@ -930,8 +969,9 @@ begin
   end;
 
   // Serbian letters
-  if (Pos('ђ', AText) > 0) or (Pos('љ', AText) > 0) or (Pos('њ', AText) > 0) or (Pos('ћ', AText) > 0) or (Pos('џ', AText) > 0) or
-     (Pos('Ђ', AText) > 0) or (Pos('Љ', AText) > 0) or (Pos('Њ', AText) > 0) or (Pos('Ћ', AText) > 0) or (Pos('Џ', AText) > 0) then
+  if (Pos('ђ', AText) > 0) or (Pos('љ', AText) > 0) or (Pos('њ', AText) > 0) or (Pos('ћ', AText) > 0) or
+    (Pos('џ', AText) > 0) or (Pos('Ђ', AText) > 0) or (Pos('Љ', AText) > 0) or (Pos('Њ', AText) > 0) or
+    (Pos('Ћ', AText) > 0) or (Pos('Џ', AText) > 0) then
   begin
     Code := 'sr';
     Confidence := 1.0;
@@ -961,7 +1001,7 @@ begin
   end;
 
   HasUmlaut := (Pos('ä', AText) > 0) or (Pos('ö', AText) > 0) or (Pos('ü', AText) > 0) or
-               (Pos('Ä', AText) > 0) or (Pos('Ö', AText) > 0) or (Pos('Ü', AText) > 0);
+    (Pos('Ä', AText) > 0) or (Pos('Ö', AText) > 0) or (Pos('Ü', AText) > 0);
   if HasUmlaut then
   begin
     Code := 'de';
