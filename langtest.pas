@@ -154,7 +154,7 @@ begin
           begin
             DetectedCode := DetectLanguageWithConfidence(TestText, Confidence);
             if k > 1 then ResultsLine := ResultsLine + ' ';
-            ResultsLine := ResultsLine + DetectedCode;
+            ResultsLine := ResultsLine + DetectedCode + Format('%.2f', [Confidence]);
             if DetectedCode = FileNameNoExt then Inc(FileOK);
           end;
         end
@@ -167,7 +167,7 @@ begin
             TestText := UTF8Copy(RawText, StartIdx, MaxLen);
             DetectedCode := DetectLanguageWithConfidence(TestText, Confidence);
             if k > 0 then ResultsLine := ResultsLine + ' ';
-            ResultsLine := ResultsLine + DetectedCode;
+            ResultsLine := ResultsLine + DetectedCode + Format('%.2f', [Confidence]);
             if DetectedCode = FileNameNoExt then Inc(FileOK);
           end;
         end;

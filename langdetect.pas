@@ -4,6 +4,7 @@
 //  You may obtain a copy of the License at https://www.gnu.org/licenses/gpl-3.0.html
 //-----------------------------------------------------------------------------------
 //  uLangDetect.pas  –  Fast language detection using character trigrams
+//                      and frequent-word dictionaries for short/ambiguous texts.
 //  Always initialises a set of default profiles, then merges in any profiles
 //  found in an external binary file (langprofiles.dat).  Profiles from the
 //  file overwrite defaults for matching language codes; new codes are added.
@@ -31,12 +32,15 @@ uses
 
 type
   TStringArray = array of string;
+  TWordWeightArray = array of word;   // dynamic array for word weights
 
   TProfile = record
     Code: string;
     Trigrams: TStringArray;   // sorted by frequency, most frequent first
     Freqs: array of word;     // corresponding frequency values (same order)
-    Priority: word;   // lower = more common, used for short texts tie-breaking
+    Wrds: TStringArray;       // top frequent words (renamed to avoid conflict with 'Word')
+    WrdFreqs: TWordWeightArray; // positional weights for words
+    Priority: word;           // lower = more common, used for tie‑breaking
   end;
 
   TScriptType = (
@@ -73,13 +77,19 @@ type
 var
   Profiles: array of TProfile;
 
+const
+  UNKNOWN = 'unknown';
+
   {%EndRegion}
 
 //  Extract character trigrams from a UTF-8 text
 //  For texts dominated by CJK characters, spaces are ignored.
 function ExtractCharTrigrams(const AText: string): TStringArray;
 
-// Returns language code (e.g. 'en', 'ru') or 'unknown'
+// If the text is shorter than 10 characters and the confidence is less than the threshold, we consider it unknown.
+function DetectLanguageSafe(const AText: string; MinConfidence: double = 0.5): string;
+
+// Returns language code (e.g. 'en', 'ru') or UNKNOWN
 function DetectLanguageForText(const AText: string): string;
 
 // Also returns a confidence value between 0.0 and 1.0
@@ -492,15 +502,35 @@ begin
   end;
 end;
 
-// Post-correction for language pairs that trigrams alone have trouble separating
+// Post-correction for language pairs that trigrams alone have trouble separating.
 // Only fires when the current best guess belongs to one of the problematic pairs,
-// and then uses unique characters or high-frequency words to decide
+// and then uses unique characters or high-frequency words to decide.
 procedure ApplyPostCorrection(var Code: string; var Confidence: double; const AText: string);
+var
+  TwScore, CnScore: integer;
+
+// Check if a word exists with word boundaries (space or start/end of string).
+  function HasWord(const word: string): boolean;
+  var
+    p, len: integer;
+  begin
+    Result := False;
+    len := Length(word);
+    if len = 0 then Exit;
+    p := Pos(word, AText);
+    if p = 0 then Exit;
+    // Check left boundary
+    if (p > 1) and (AText[p - 1] <> ' ') then Exit;
+    // Check right boundary
+    if (p + len <= Length(AText)) and (AText[p + len] <> ' ') then Exit;
+    Result := True;
+  end;
+
 begin
   // Norwegian vs Danish vs Swedish
   if (Code = 'no') or (Code = 'da') or (Code = 'sv') then
   begin
-    // Swedish has unique letters
+    // Swedish unique letters
     if (Pos('ä', AText) > 0) or (Pos('ö', AText) > 0) then
     begin
       Code := 'sv';
@@ -508,55 +538,62 @@ begin
       Exit;
     end;
 
-    // Strong Norwegian markers
-    if (Pos(' ikkje ', AText) > 0) or
-       (Pos(' meg ', AText) > 0) or
-       (Pos(' deg ', AText) > 0) or
-       (Pos(' dere ', AText) > 0) or
-       (Pos(' av ', AText) > 0) or
-       (Pos(' bruker ', AText) > 0) then
+    // Norwegian nynorsk marker (very strong)
+    if HasWord('ikkje') then
     begin
       Code := 'no';
       Confidence := 1.0;
       Exit;
     end;
 
-    // Strong Danish markers
-    if (Pos(' mig ', AText) > 0) or
-       (Pos(' dig ', AText) > 0) or
-       (Pos(' jer ', AText) > 0) or
-       (Pos(' af ', AText) > 0) or
-       (Pos(' bruger ', AText) > 0) then
+    // Danish strong marker
+    if HasWord('ikke') then
     begin
-      Code := 'da';
-      Confidence := 1.0;
-      Exit;
+      // Both Norwegian Bokmål and Danish use 'ikke', so look for other clues
+      if HasWord('jeg') or HasWord('mig') or HasWord('dig') or HasWord('jer') or HasWord('af') then
+      begin
+        Code := 'da';
+        Confidence := 1.0;
+        Exit;
+      end
+      else if HasWord('meg') or HasWord('deg') or HasWord('dere') or HasWord('av') then
+      begin
+        Code := 'no';
+        Confidence := 1.0;
+        Exit;
+      end;
+      // If only 'ikke' is present, keep the trigram result (could be either).
     end;
 
-    // Swedish words
-    if (Pos(' och ', AText) > 0) or
-       (Pos(' är ', AText) > 0) or
-       (Pos(' inte ', AText) > 0) then
+    // Swedish common words
+    if HasWord('och') or HasWord('är') or HasWord('inte') or HasWord('att') then
     begin
       Code := 'sv';
       Confidence := 1.0;
       Exit;
     end;
 
-    // Norwegian fallback
-    if (Pos(' ikke ', AText) > 0) or
-       (Pos(' seg ', AText) > 0) then
+    // Norwegian common words
+    if HasWord('meg') or HasWord('deg') or HasWord('dere') or HasWord('av') or HasWord('bruker') then
     begin
       Code := 'no';
       Confidence := 1.0;
       Exit;
     end;
 
-    // Danish fallback
-    if (Pos(' sig ', AText) > 0) then
+    // Danish common words
+    if HasWord('mig') or HasWord('dig') or HasWord('jer') or HasWord('af') or HasWord('bruger') then
     begin
       Code := 'da';
       Confidence := 1.0;
+      Exit;
+    end;
+
+    // Fallback: if 'jeg' appears, it's likely Norwegian Bokmål (jeg is rare in Danish)
+    if HasWord('jeg') then
+    begin
+      Code := 'no';
+      Confidence := 0.9;
       Exit;
     end;
   end;
@@ -564,15 +601,85 @@ begin
   // Xhosa vs Zulu
   if (Code = 'xh') or (Code = 'zu') then
   begin
-    if (Pos(' xh ', AText) > 0) or
-       (Pos(' kwaye ', AText) > 0) or
-       (Pos(' umntu ', AText) > 0) then
+    // Xhosa markers
+    if HasWord('xh') or HasWord('kwaye') or HasWord('umntu') or HasWord('ngoku') or HasWord('kwa') or
+      HasWord('xa') or HasWord('ndi') then
     begin
       Code := 'xh';
       Confidence := 1.0;
       Exit;
     end;
+    // Zulu markers
+    if HasWord('zu') or HasWord('ngi') or HasWord('uku') or HasWord('kanti') or HasWord('yena') or
+      HasWord('lapha') or HasWord('yini') or HasWord('nini') or HasWord('lona') then
+    begin
+      Code := 'zu';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // If no marker found, reduce confidence
+    Confidence := 0.45;
   end;
+
+  // Bosnian / Croatian / Serbian (Latin script)
+  if (Code = 'bs') or (Code = 'hr') or (Code = 'sr') then
+  begin
+    // Croatian characteristic words
+    if HasWord('što') or HasWord('tko') then
+    begin
+      Code := 'hr';
+      Confidence := 0.95;
+      Exit;
+    end;
+    // Serbian/Bosnian characteristic words (may also appear in Croatian, but less often)
+    if HasWord('šta') or HasWord('ko') then
+    begin
+      // Cannot reliably distinguish Serbian from Bosnian without Cyrillic or more words,
+      // so we keep the trigram result but lower confidence slightly.
+      Confidence := 0.8;
+      Exit;
+    end;
+    // No markers found – decrease confidence to avoid false high certainty
+    Confidence := 0.6;
+  end;
+
+  // Albanian vs Turkish
+  if (Code = 'sq') or (Code = 'tr') then
+  begin
+    // Albanian specific letter: ë (Turkish does not have)
+    if (Pos('ë', AText) > 0) then
+    begin
+      Code := 'sq';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Turkish specific letters
+    if (Pos('ı', AText) > 0) or (Pos('ş', AText) > 0) or (Pos('ğ', AText) > 0) then
+    begin
+      Code := 'tr';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // If neither special character is present, lower confidence
+    Confidence := 0.7;
+  end;
+
+  // Sanskrit (Latin IAST) vs English – only boost confidence if diacritics present,
+  // otherwise trust trigrams (they already work well for 80-char texts).
+  if (Code = 'sa') and (Confidence < 1.0) then
+  begin
+    if (Pos('ā', AText) > 0) or (Pos('ī', AText) > 0) or (Pos('ū', AText) > 0) or (Pos('ṛ', AText) > 0) or
+      (Pos('ṣ', AText) > 0) or (Pos('ṃ', AText) > 0) or (Pos('ḥ', AText) > 0) then
+    begin
+      Code := 'sa';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // No diacritics – leave trigram result unchanged.
+  end;
+
+  // Indonesian vs Malay: removed block because trigrams perform well at 80 chars.
+  // (Keep this comment to document the intentional omission.)
 
   // Belarusian / Ukrainian / Russian (Cyrillic group)
   if (Code = 'be') or (Code = 'uk') or (Code = 'ru') then
@@ -583,23 +690,19 @@ begin
       Confidence := 1.0;
       Exit;
     end;
-
-    if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or
-       (Pos('ґ', AText) > 0) or (Pos('Ї', AText) > 0) or
-       (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
+    if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or (Pos('ґ', AText) > 0) or (Pos('Ї', AText) > 0) or
+      (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
     begin
       Code := 'uk';
       Confidence := 1.0;
       Exit;
     end;
-
     if (Pos('і', AText) > 0) or (Pos('І', AText) > 0) then
     begin
       if (Pos('ы', AText) > 0) or (Pos('Ы', AText) > 0) then
         Code := 'be'
       else
         Code := 'uk';
-
       Confidence := 1.0;
       Exit;
     end;
@@ -608,17 +711,13 @@ begin
   // Bulgarian vs Macedonian
   if (Code = 'bg') or (Code = 'mk') then
   begin
-    if (Pos('ъ', AText) > 0) and
-       (Pos('ы', AText) = 0) and
-       (Pos('ё', AText) = 0) and
-       (Pos('э', AText) = 0) then
+    if (Pos('ъ', AText) > 0) and (Pos('ы', AText) = 0) and (Pos('ё', AText) = 0) and (Pos('э', AText) = 0) then
     begin
       Code := 'bg';
       Confidence := 1.0;
       Exit;
     end
-    else if (Pos('ѓ', AText) > 0) or
-            (Pos('ќ', AText) > 0) then
+    else if (Pos('ѓ', AText) > 0) or (Pos('ќ', AText) > 0) then
     begin
       Code := 'mk';
       Confidence := 1.0;
@@ -629,36 +728,20 @@ begin
   // Spanish vs Galician vs Portuguese
   if (Code = 'es') or (Code = 'gl') or (Code = 'pt') then
   begin
-    // Portuguese
-    if (Pos('ç', AText) > 0) or
-       (Pos('ão', AText) > 0) or
-       (Pos('ção', AText) > 0) or
-       (Pos('ções', AText) > 0) then
+    if (Pos('ç', AText) > 0) or (Pos('ão', AText) > 0) or (Pos('ção', AText) > 0) or (Pos('ções', AText) > 0) then
     begin
       Code := 'pt';
       Confidence := 1.0;
       Exit;
     end;
-
-    // Galician
-    if (Pos(' non ', AText) > 0) or
-       (Pos(' galego ', AText) > 0) or
-       (Pos(' nós ', AText) > 0) or
-       (Pos(' vós ', AText) > 0) or
-       (Pos(' unha ', AText) > 0) or
-       (Pos(' dúas ', AText) > 0) or
-       (Pos(' ao ', AText) > 0) or
-       (Pos(' coa ', AText) > 0) then
+    if HasWord('non') or HasWord('galego') or HasWord('nós') or HasWord('vós') or HasWord('unha') or
+      HasWord('dúas') or HasWord('ao') or HasWord('coa') then
     begin
       Code := 'gl';
       Confidence := 1.0;
       Exit;
     end;
-
-    // Spanish
-    if (Pos('ñ', AText) > 0) or
-       (Pos('¿', AText) > 0) or
-       (Pos('¡', AText) > 0) then
+    if (Pos('ñ', AText) > 0) or (Pos('¿', AText) > 0) or (Pos('¡', AText) > 0) then
     begin
       Code := 'es';
       Confidence := 1.0;
@@ -669,17 +752,13 @@ begin
   // Czech vs Slovak
   if (Code = 'cs') or (Code = 'sk') then
   begin
-    if (Pos('ä', AText) > 0) or
-       (Pos('ô', AText) > 0) or
-       (Pos('ŕ', AText) > 0) or
-       (Pos('ĺ', AText) > 0) then
+    if (Pos('ä', AText) > 0) or (Pos('ô', AText) > 0) or (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) then
     begin
       Code := 'sk';
       Confidence := 1.0;
       Exit;
     end
-    else if (Pos('ř', AText) > 0) or
-            (Pos('ů', AText) > 0) then
+    else if (Pos('ř', AText) > 0) or (Pos('ů', AText) > 0) then
     begin
       Code := 'cs';
       Confidence := 1.0;
@@ -690,16 +769,113 @@ begin
   // Chinese Simplified vs Traditional
   if (Code = 'zh-CN') or (Code = 'zh-TW') then
   begin
-    if (Pos('國', AText) > 0) or
-       (Pos('體', AText) > 0) or
-       (Pos('門', AText) > 0) or
-       (Pos('機', AText) > 0) or
-       (Pos('關', AText) > 0) then
+    TwScore := 0;
+    CnScore := 0;
+
+    Inc(TwScore, Ord(Pos('國', AText) > 0));
+    Inc(TwScore, Ord(Pos('體', AText) > 0));
+    Inc(TwScore, Ord(Pos('門', AText) > 0));
+    Inc(TwScore, Ord(Pos('機', AText) > 0));
+    Inc(TwScore, Ord(Pos('關', AText) > 0));
+    Inc(TwScore, Ord(Pos('開', AText) > 0));
+    Inc(TwScore, Ord(Pos('電', AText) > 0));
+    Inc(TwScore, Ord(Pos('學', AText) > 0));
+    Inc(TwScore, Ord(Pos('說', AText) > 0));
+    Inc(TwScore, Ord(Pos('這', AText) > 0));
+    Inc(TwScore, Ord(Pos('個', AText) > 0));
+    Inc(TwScore, Ord(Pos('為', AText) > 0));
+    Inc(TwScore, Ord(Pos('與', AText) > 0));
+    Inc(TwScore, Ord(Pos('實', AText) > 0));
+    Inc(TwScore, Ord(Pos('歡', AText) > 0));
+
+    Inc(CnScore, Ord(Pos('国', AText) > 0));
+    Inc(CnScore, Ord(Pos('体', AText) > 0));
+    Inc(CnScore, Ord(Pos('门', AText) > 0));
+    Inc(CnScore, Ord(Pos('机', AText) > 0));
+    Inc(CnScore, Ord(Pos('关', AText) > 0));
+    Inc(CnScore, Ord(Pos('开', AText) > 0));
+    Inc(CnScore, Ord(Pos('电', AText) > 0));
+    Inc(CnScore, Ord(Pos('学', AText) > 0));
+    Inc(CnScore, Ord(Pos('说', AText) > 0));
+    Inc(CnScore, Ord(Pos('这', AText) > 0));
+    Inc(CnScore, Ord(Pos('个', AText) > 0));
+    Inc(CnScore, Ord(Pos('为', AText) > 0));
+    Inc(CnScore, Ord(Pos('与', AText) > 0));
+    Inc(CnScore, Ord(Pos('实', AText) > 0));
+    Inc(CnScore, Ord(Pos('欢', AText) > 0));
+
+    if TwScore > CnScore then
     begin
       Code := 'zh-TW';
       Confidence := 1.0;
       Exit;
     end;
+    if CnScore > TwScore then
+    begin
+      Code := 'zh-CN';
+      Confidence := 1.0;
+      Exit;
+    end;
+  end;
+
+  // Esperanto vs Khmer (Latin) – added based on 300-char test
+  if (Code = 'eo') or (Code = 'km') then
+  begin
+    // Esperanto unique letters
+    if (Pos('ĉ', AText) > 0) or (Pos('ĝ', AText) > 0) or (Pos('ĥ', AText) > 0) or (Pos('ĵ', AText) > 0) or
+      (Pos('ŝ', AText) > 0) or (Pos('ŭ', AText) > 0) then
+    begin
+      Code := 'eo';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Common Esperanto words
+    if HasWord('kaj') or HasWord('estas') or HasWord('estis') or HasWord('de') or HasWord('la') or HasWord('al') or HasWord('ke') then
+    begin
+      Code := 'eo';
+      Confidence := 0.95;
+      Exit;
+    end;
+    // If trigrams chose eo but no markers found, switch to km with moderate confidence
+    if Code = 'eo' then
+    begin
+      Code := 'km';
+      Confidence := 0.7;
+      Exit;
+    end;
+    // If trigrams chose km and no eo markers, boost km confidence slightly
+    if Code = 'km' then
+      Confidence := 0.8;
+  end;
+
+  // Uzbek vs Guarani – added based on 300-char test
+  if (Code = 'uz') or (Code = 'gn') then
+  begin
+    // Guarani uses tilde letters
+    if (Pos('ñ', AText) > 0) or (Pos('ã', AText) > 0) or (Pos('ẽ', AText) > 0) or (Pos('ĩ', AText) > 0) or
+      (Pos('õ', AText) > 0) or (Pos('ũ', AText) > 0) then
+    begin
+      Code := 'gn';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // Uzbek uses apostrophes (U+2018, U+02BC) after o and g
+    if (Pos('‘', AText) > 0) or (Pos('ʼ', AText) > 0) then
+    begin
+      Code := 'uz';
+      Confidence := 1.0;
+      Exit;
+    end;
+    // No special chars – lower confidence
+    Confidence := 0.5;
+  end;
+
+  // Thai vs English – only intervene if trigrams chose English but Thai chars present
+  if (Code = 'en') and (Pos('ก', AText) > 0) then  // any Thai character (ก is common)
+  begin
+    Code := 'th';
+    Confidence := 1.0;
+    Exit;
   end;
 end;
 
@@ -1000,8 +1176,8 @@ begin
     Exit;
   end;
 
-  HasUmlaut := (Pos('ä', AText) > 0) or (Pos('ö', AText) > 0) or (Pos('ü', AText) > 0) or
-    (Pos('Ä', AText) > 0) or (Pos('Ö', AText) > 0) or (Pos('Ü', AText) > 0);
+  HasUmlaut := (Pos('ä', AText) > 0) or (Pos('ö', AText) > 0) or (Pos('ü', AText) > 0) or (Pos('Ä', AText) > 0) or
+    (Pos('Ö', AText) > 0) or (Pos('Ü', AText) > 0);
   if HasUmlaut then
   begin
     Code := 'de';
@@ -1038,6 +1214,77 @@ begin
       Confidence := 1.0;
       Exit;
     end;
+  end;
+end;
+
+// Uses the same tokenisation as BuildWordList in the generator.
+// Returns total weight sum of found words; higher = better.
+// Score a language profile by counting word matches (each token once).
+function ScoreByWrds(const Text: string; const Profile: TProfile): integer;
+var
+  p, charLen: integer;
+  ch, token: string;
+  i: integer;
+  seenTokens: TStringList;  // tracks already counted tokens
+begin
+  Result := 0;
+  if Length(Profile.Wrds) = 0 then Exit;
+
+  seenTokens := TStringList.Create;
+  try
+    seenTokens.Sorted := True;
+    seenTokens.Duplicates := dupIgnore;
+    p := 1;
+    token := '';
+    while p <= Length(Text) do
+    begin
+      {$NOTES OFF}
+      charLen := UTF8CodepointSize(@Text[p]);
+      {$NOTES ON}
+      if charLen = 0 then
+      begin
+        Inc(p);
+        Continue;
+      end;
+      ch := Copy(Text, p, charLen);
+      Inc(p, charLen);
+      if ((ch[1] >= 'A') and (ch[1] <= 'Z')) or ((ch[1] >= 'a') and (ch[1] <= 'z')) or (Ord(ch[1]) >= $C0) then
+        token := token + UTF8LowerCase(ch)
+      else
+      begin
+        if (UTF8Length(token) >= 2) and (UTF8Length(token) <= 30) then
+        begin
+          // Process token only once per text
+          if seenTokens.IndexOf(token) < 0 then
+          begin
+            seenTokens.Add(token);
+            for i := 0 to High(Profile.Wrds) do
+              if Profile.Wrds[i] = token then
+              begin
+                Inc(Result, Profile.WrdFreqs[i]);
+                Break;
+              end;
+          end;
+        end;
+        token := '';
+      end;
+    end;
+    // Last token
+    if (UTF8Length(token) >= 2) and (UTF8Length(token) <= 30) then
+    begin
+      if seenTokens.IndexOf(token) < 0 then
+      begin
+        seenTokens.Add(token);
+        for i := 0 to High(Profile.Wrds) do
+          if Profile.Wrds[i] = token then
+          begin
+            Inc(Result, Profile.WrdFreqs[i]);
+            Break;
+          end;
+      end;
+    end;
+  finally
+    seenTokens.Free;
   end;
 end;
 
@@ -1137,6 +1384,15 @@ begin
     Result[i] := chars[i] + chars[i + 1] + chars[i + 2];
 end;
 
+function DetectLanguageSafe(const AText: string; MinConfidence: double): string;
+var
+  conf: double;
+begin
+  Result := DetectLanguageWithConfidence(AText, conf);
+  if conf < MinConfidence then
+    Result := UNKNOWN;
+end;
+
 function DetectLanguageForText(const AText: string): string;
 var
   dummy: double;
@@ -1146,14 +1402,33 @@ end;
 
 function DetectLanguageWithConfidence(const AText: string; out Confidence: double): string;
 const
-  SHORT_TEXT_THRESHOLD = 20; // characters, below this trigrams are too noisy
+  SHORT_TEXT_THRESHOLD = 20;        // characters, below this trigrams are too noisy (disabled)
+  HIGH_TRIGRAM_CONFIDENCE = 0.9;    // If trigrams give such confidence, we trust them even in a short text
+  WORD_CORRECTION_ALWAYS = 100;     // always try word correction for texts <= this length
+  LOW_TRIGRAM_CONFIDENCE = 0.7;     // trigram confidence below which to try words for longer texts
+  WORD_GAP_RATIO = 1.05;            // best word score must exceed second best by this factor
 var
   textTrigrams: TStringArray;
-  i, bestIdx, secondIdx: integer;
+  bestIdx, secondIdx: integer;
   bestDist, secondDist, currentDist: double;
   ScriptInfo: TScriptInfo;
   Script: TScriptType = stOther;
   bestPriority: word;
+  wordScore, maxWordScore, secondWordScore: integer;
+  wordIdx: integer;
+  matchCount: integer;
+  rankSum: integer;
+  avgRank: double;
+  hitRatio: double;
+  rankBonus: double;
+  trigCount: integer;
+  profileSize: integer;
+  pos: integer;
+  rawConfidence: double;
+  separationFactor: double;
+  deltaDist: double;
+  sumAbsDist: double;
+  i, j: integer;
 
   function IsCJKCodeAllowed(const Code: string): boolean;
   begin
@@ -1168,58 +1443,16 @@ var
 begin
   ScriptInfo := Default(TScriptInfo);
   Confidence := 0.0;
-  if Length(AText) < 3 then Exit('unknown');
+  if Length(AText) < 3 then Exit(UNKNOWN);
 
   // 1. Quick script detection + CJK refinement
   Result := QuickScriptDetection(AText, ScriptInfo, Script, Confidence);
   if Result <> '' then Exit;
 
-  // Very short text: script and priority instead of trigrams
-  if UTF8Length(AText) <= SHORT_TEXT_THRESHOLD then
-  begin
-    bestIdx := -1;
-    bestPriority := High(word);
-    for i := 0 to High(Profiles) do
-    begin
-      if IsLanguageMatchingScript(Profiles[i].Code, Script) then
-      begin
-        if Profiles[i].Priority < bestPriority then
-        begin
-          bestPriority := Profiles[i].Priority;
-          bestIdx := i;
-        end;
-      end;
-    end;
-
-    // Fallback: no script match – take globally highest priority profile
-    if bestIdx < 0 then
-    begin
-      bestIdx := 0;
-      for i := 1 to High(Profiles) do
-        if Profiles[i].Priority < Profiles[bestIdx].Priority then
-          bestIdx := i;
-    end;
-
-    if bestIdx >= 0 then
-    begin
-      Result := Profiles[bestIdx].Code;
-      Confidence := 0.7; // moderate confidence for very short text
-    end
-    else
-    begin
-      Result := 'unknown';
-      Confidence := 0.0;
-    end;
-
-    // Apply short-text specific character-based correction
-    ApplyShortTextCorrection(Result, Confidence, AText);
-    Exit;
-  end;
-
   // 2. Extract trigrams
   textTrigrams := ExtractCharTrigrams(AText);
   if Length(textTrigrams) = 0 then
-    Exit('unknown');
+    Exit(UNKNOWN);
 
   // 3. Main trigram-based matching
   bestDist := 1e9;
@@ -1291,19 +1524,150 @@ begin
   if bestIdx >= 0 then
   begin
     Result := Profiles[bestIdx].Code;
-    if (secondIdx >= 0) and (bestDist + secondDist > 0) then
-      Confidence := 1.0 - (bestDist / (bestDist + secondDist))
+
+    // Base confidence from hit ratio and average rank
+    matchCount := 0;
+    rankSum := 0;
+    trigCount := Length(textTrigrams);
+    profileSize := Length(Profiles[bestIdx].Trigrams);
+    if (trigCount > 0) and (profileSize > 0) then
+    begin
+      for i := 0 to trigCount - 1 do
+      begin
+        pos := -1;
+        for j := 0 to profileSize - 1 do
+          if Profiles[bestIdx].Trigrams[j] = textTrigrams[i] then
+          begin
+            pos := j;
+            Break;
+          end;
+        if pos >= 0 then
+        begin
+          Inc(matchCount);
+          rankSum := rankSum + (pos + 1);
+        end;
+      end;
+
+      hitRatio := matchCount / trigCount;
+
+      if matchCount > 0 then
+        avgRank := rankSum / matchCount
+      else
+        avgRank := profileSize;
+
+      if profileSize > 1 then
+        rankBonus := 1.0 - (avgRank - 1) / (profileSize - 1)
+      else
+        rankBonus := 1.0;
+
+      if rankBonus < 0.0 then rankBonus := 0.0;
+      if rankBonus > 1.0 then rankBonus := 1.0;
+
+      rawConfidence := (hitRatio + rankBonus) / 2.0;
+
+      // Adaptive separation factor: how much better is best than second?
+      if (secondIdx >= 0) and (secondDist < 1e9) then
+      begin
+        deltaDist := secondDist - bestDist;      // positive = best is better
+        sumAbsDist := abs(bestDist) + abs(secondDist);
+        if sumAbsDist > 0 then
+          separationFactor := 0.5 + 0.5 * (deltaDist / sumAbsDist)
+        else
+          separationFactor := 0.5;
+        if separationFactor < 0.0 then separationFactor := 0.0;
+        if separationFactor > 1.0 then separationFactor := 1.0;
+      end
+      else
+        separationFactor := 1.0;
+
+      // Apply separation factor, but never reduce below 70% of raw confidence
+      if separationFactor >= 0.7 then
+        Confidence := rawConfidence * separationFactor
+      else
+        Confidence := rawConfidence * 0.7;  // lower bound to avoid zeroing out
+    end
     else
-      Confidence := 1.0;
-  end
-  else
-  begin
-    Result := 'unknown';
-    Confidence := 0.0;
+      Confidence := 0.0;
+
+    if Confidence > 1.0 then Confidence := 1.0;
+    if Confidence < 0.0 then Confidence := 0.0;
   end;
 
-  // 5. Post-correction for difficult pairs
+  // 5. Word-based correction for short or low-confidence results
+  if (UTF8Length(AText) < WORD_CORRECTION_ALWAYS) or (Confidence < LOW_TRIGRAM_CONFIDENCE) then
+  begin
+    maxWordScore := 0;
+    secondWordScore := 0;
+    wordIdx := -1;
+    for i := 0 to High(Profiles) do
+    begin
+      if (Script <> stOther) and not IsLanguageMatchingScript(Profiles[i].Code, Script) then
+        Continue;
+      wordScore := ScoreByWrds(AText, Profiles[i]);
+      if wordScore > maxWordScore then
+      begin
+        secondWordScore := maxWordScore;
+        maxWordScore := wordScore;
+        wordIdx := i;
+      end
+      else if wordScore > secondWordScore then
+        secondWordScore := wordScore;
+    end;
+    // Replace trigram result only if word signal is strong and unambiguous
+    if (maxWordScore > 0) and (wordIdx >= 0) then
+    begin
+      // For short texts a narrow word-score lead is more reliable than noisy trigrams
+      if (UTF8Length(AText) <= WORD_CORRECTION_ALWAYS) and (maxWordScore > secondWordScore * WORD_GAP_RATIO) then
+      begin
+        Result := Profiles[wordIdx].Code;
+        Confidence := 0.9;
+      end
+      else
+      if (secondWordScore = 0) or (maxWordScore > secondWordScore * WORD_GAP_RATIO) then
+      begin
+        Result := Profiles[wordIdx].Code;
+        Confidence := 0.95;
+      end;
+    end;
+  end;
+
+  // 6. Post-correction for difficult pairs
   ApplyPostCorrection(Result, Confidence, AText);
+
+  // 7. For very short texts, if trigram confidence is low, fall back to priority + special chars
+  if (UTF8Length(AText) < SHORT_TEXT_THRESHOLD) and (Confidence < HIGH_TRIGRAM_CONFIDENCE) then
+  begin
+    // Reset to priority-based guess (same logic as before, but only as fallback)
+    bestIdx := -1;
+    bestPriority := High(word);
+    for i := 0 to High(Profiles) do
+    begin
+      if IsLanguageMatchingScript(Profiles[i].Code, Script) then
+        if Profiles[i].Priority < bestPriority then
+        begin
+          bestPriority := Profiles[i].Priority;
+          bestIdx := i;
+        end;
+    end;
+    if bestIdx < 0 then
+    begin
+      bestIdx := 0;
+      for i := 1 to High(Profiles) do
+        if Profiles[i].Priority < Profiles[bestIdx].Priority then
+          bestIdx := i;
+    end;
+    if bestIdx >= 0 then
+    begin
+      Result := Profiles[bestIdx].Code;
+      Confidence := 0.7;
+    end
+    else
+    begin
+      Result := UNKNOWN;
+      Confidence := 0.0;
+    end;
+    ApplyShortTextCorrection(Result, Confidence, AText);
+  end;
 end;
 
 {%EndRegion}
@@ -1317,16 +1681,18 @@ end;
 procedure MergeProfilesFromStream(AStream: TStream);
 const
   MAX_TRIGRAMS = 2000;
+  MAX_WORDS = 2000;            // safety limit
   MAGIC_COMPRESSED: cardinal = $4F525047; // 'GPRO' in little-endian
 var
   magic: cardinal;
   isCompressed: boolean;
   totalLangs, Count: integer;
-  i, j, trigCount, existingIdx: integer;
+  i, j, trigCount, wordCount, existingIdx: integer;
   codeLen: integer;
   code: string = string.Empty;
-  trigLen: integer;
+  trigLen, wordLen: integer;
   trig: string = string.Empty;
+  wrd: string = string.Empty;
   freq: word;
   fileProfiles: array of TProfile = ();
   comprSize: cardinal;
@@ -1361,29 +1727,14 @@ begin
       AStream.ReadBuffer(comprSize, SizeOf(comprSize));
       if (comprSize <= 0) or (comprSize > AStream.Size - AStream.Position) then
         raise Exception.Create('Invalid compressed size');
-      // Read compressed data into a temporary memory stream to pass to decompressor
       tempStream := TMemoryStream.Create;
       try
         tempStream.CopyFrom(AStream, comprSize);
         tempStream.Position := 0;
-        // DecompressMemoryStream expects the stream to contain 4-byte original size + data
-        // So we need to extract the original size first? Our DecompressMemoryStream above
-        // reads original size from the stream. We'll use it directly.
-        // But better: decompress and then read language data from the resulting stream.
-        // We'll adjust: instead of using DecompressMemoryStream, we'll extract originalSize
-        // and do the decompression inline, or use a simpler helper.
-        // Let's use a local function that works on a given stream.
-        // Actually, DecompressMemoryStream expects a stream that starts with original size;
-        // our compressed block in the file is exactly that: it starts with original size.
-        // So we can pass a TMemoryStream that contains the whole compressed block.
-        // That's what we have in tempStream. So we can call DecompressMemoryStream(tempStream).
-        // But DecompressMemoryStream as defined above reads originalSize from the current position,
-        // then reads the rest. So that works perfectly.
-        tempStream.Position := 0;
         plainStream := TOS.DecompressMemoryStream(tempStream);
         try
           plainStream.Position := 0;
-          // Now read language data from plainStream
+          // Read language code
           codeLen := 0;
           plainStream.ReadBuffer(codeLen, SizeOf(codeLen));
           SetLength(code, codeLen);
@@ -1392,6 +1743,7 @@ begin
           fileProfiles[i].Code := code;
           fileProfiles[i].Priority := GetLanguagePriority(code);
 
+          // Read trigrams
           trigCount := 0;
           plainStream.ReadBuffer(trigCount, SizeOf(trigCount));
           if trigCount > MAX_TRIGRAMS then
@@ -1413,6 +1765,33 @@ begin
             freq := 0;
             plainStream.ReadBuffer(freq, SizeOf(freq));
             fileProfiles[i].Freqs[j] := freq;
+          end;
+
+          // Read optional word dictionary (backward compatible)
+          SetLength(fileProfiles[i].Wrds, 0);
+          SetLength(fileProfiles[i].WrdFreqs, 0);
+          if plainStream.Position < plainStream.Size then
+          begin
+            wordCount := 0;
+            plainStream.ReadBuffer(wordCount, SizeOf(wordCount));
+            if (wordCount > 0) and (wordCount <= MAX_WORDS) then
+            begin
+              SetLength(fileProfiles[i].Wrds, wordCount);
+              SetLength(fileProfiles[i].WrdFreqs, wordCount);
+              for j := 0 to wordCount - 1 do
+              begin
+                wordLen := 0;
+                plainStream.ReadBuffer(wordLen, SizeOf(wordLen));
+                SetLength(wrd, wordLen);
+                if wordLen > 0 then
+                  plainStream.ReadBuffer(wrd[1], wordLen);
+                fileProfiles[i].Wrds[j] := wrd;
+
+                freq := 0;
+                plainStream.ReadBuffer(freq, SizeOf(freq));
+                fileProfiles[i].WrdFreqs[j] := freq;
+              end;
+            end;
           end;
         finally
           plainStream.Free;
@@ -1462,6 +1841,9 @@ begin
         AStream.ReadBuffer(freq, SizeOf(freq));
         fileProfiles[i].Freqs[j] := freq;
       end;
+      // Old format had no word dictionaries; leave empty.
+      SetLength(fileProfiles[i].Wrds, 0);
+      SetLength(fileProfiles[i].WrdFreqs, 0);
     end;
   end;
 
@@ -1480,6 +1862,8 @@ begin
     begin
       Profiles[existingIdx].Trigrams := fileProfiles[i].Trigrams;
       Profiles[existingIdx].Freqs := fileProfiles[i].Freqs;
+      Profiles[existingIdx].Wrds := fileProfiles[i].Wrds;
+      Profiles[existingIdx].WrdFreqs := fileProfiles[i].WrdFreqs;
     end
     else
     begin

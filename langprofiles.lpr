@@ -13,7 +13,10 @@
 //    3. Assign a positional weight: the most probable trigram receives the
 //       highest weight (POS_WEIGHT_BASE - rank), so that common trigrams
 //       contribute stronger in the distance metric.
-//    4. Pack the language data into a memory stream, compress it with zlib
+//    4. For non-CJK languages, extract frequent words (min length 3),
+//       remove words that appear in more than one language, and store
+//       the top NumWords with positional weights.
+//    5. Pack the language data into a memory stream, compress it with zlib
 //       (deflate) using osutils.CompressMemoryStream, and write the
 //       compressed block prefixed by its size.
 //-----------------------------------------------------------------------------------
@@ -24,6 +27,7 @@
 //      The compressed block contains:
 //        [codeLen: Integer][langCode: UTF-8 bytes]
 //        [trigCount: Integer][for each trigram: trigLen: Integer, trig: UTF-8 bytes, weight: Word]
+//        [wordCount: Integer][for each word: wordLen: Integer, word: UTF-8 bytes, weight: Word]
 //-----------------------------------------------------------------------------------
 //  Zlib compression is used to reduce the profile file size 3-5x without
 //  any noticeable runtime cost – decompression is extremely fast (hundreds
@@ -32,9 +36,10 @@
 //  Usage:
 //    langprofiles                            run test with .\corpus (max 500, 5 samples)
 //    langprofiles <max_len> <iter>           test with custom sample size and count
-//    langprofiles gen [-n <N>]               generate profiles from .\corpus to .\langprofiles.dat
-//    langprofiles gen <corpus_dir> <out_file> [-n <N>]  generate with custom paths
-//    -n <N>  number of trigrams per language (default 600)
+//    langprofiles gen [-n <N>] [-w <W>]      generate profiles ...
+//    langprofiles gen <corpus_dir> <out_file> [-n <N>] [-w <W>] generate with custom paths
+//    -n <N>  number of trigrams per language (default 800)
+//    -w <W>  number of words per language (default 100)
 //-----------------------------------------------------------------------------------
 
 program langprofiles;
@@ -46,28 +51,63 @@ uses
   SysUtils,
   Classes,
   LazUTF8,
-  Interfaces,        // required for LCL-based langdetect unit
+  Interfaces,
   langdetect,
-  osutils,           // provides CompressMemoryStream / DecompressMemoryStream
+  osutils,
   langtest;
 
 const
-  MIN_TEXT_LENGTH = 10000;
-  FINAL_TOP = 600;            // keep 600 most characteristic trigrams
-  LOG_SCALE = 1000;           // multiply log-prob by this for sorting
-  POS_WEIGHT_BASE = 60000;    // maximum positional weight (must fit in Word)
-  MAGIC_COMPRESSED: array[0..3] of byte = ($47, $50, $52, $4F);   // Magic signature for compressed profile file ('GPRO')
-  DEF_TEST_MAXLEN = 500;
-  DEF_TEST_ITER = 3;
+  MIN_TEXT_LENGTH = 10000;                  // minimum corpus size (in characters) to consider a language valid
+  DEF_TRIG_TOP = 800;                       // default number of top trigrams to keep per language
+  DEF_WORD_TOP = 1000;                      // default number of top unique words to keep per language
+  DEF_MIN_WORD_LEN = 3;                     // minimum word length when extracting frequent words (shorter words are too common)
+  LOG_SCALE = 1000;                         // multiplier to convert log-probabilities into integer weights
+  POS_WEIGHT_BASE = 60000;                  // weight assigned to the most frequent trigram/word, decreasing by rank
+  DEF_DEDUP_THRESHOLD = 3;                  // remove words that appear in this many or more different languages
+  MAGIC_COMPRESSED: array[0..3] of byte = ($47, $50, $52, $4F);  // "GPRO" – magic marker indicating zlib-compressed profile format
+  DEF_TEST_MAXLEN = 500;                    // default maximum text length for the detection test
+  DEF_TEST_ITER = 3;                        // default number of test iterations for each sample length
 
 type
   TTrigWeight = record
     Trig: string;
-    LogWeight: integer;            // ln(prob) * LOG_SCALE (only for sorting)
+    LogWeight: integer;
   end;
   TTrigWeightArray = array of TTrigWeight;
+  TWordWeightArray = array of word;
 
-  // Sort TTrigWeight array by LogWeight descending, then Trig ascending
+  TWordFreq = record
+    W: string;
+    C: integer;
+  end;
+  TWordFreqArray = array of TWordFreq;
+
+  procedure SortWordFreqArray(var A: TWordFreqArray; L, R: integer);
+  var
+    i, j: integer;
+    pivot: TWordFreq;
+    tmp: TWordFreq;
+  begin
+    if L >= R then Exit;
+    pivot := A[(L + R) div 2];
+    i := L;
+    j := R;
+    repeat
+      while (A[i].C > pivot.C) or ((A[i].C = pivot.C) and (A[i].W < pivot.W)) do Inc(i);
+      while (A[j].C < pivot.C) or ((A[j].C = pivot.C) and (A[j].W > pivot.W)) do Dec(j);
+      if i <= j then
+      begin
+        tmp := A[i];
+        A[i] := A[j];
+        A[j] := tmp;
+        Inc(i);
+        Dec(j);
+      end;
+    until i > j;
+    SortWordFreqArray(A, L, j);
+    SortWordFreqArray(A, i, R);
+  end;
+
   procedure SortByWeight(var A: TTrigWeightArray; L, R: integer);
   var
     i, j: integer;
@@ -94,15 +134,139 @@ type
     SortByWeight(A, i, R);
   end;
 
+  procedure CollectWordsFiltered(const Corpus: string; MinLen: integer; const ExcludeWord: string; out FreqArr: TWordFreqArray);
+  var
+    freqMap: TStringList;
+    p, charLen, idx: integer;
+    ch, token: string;
+    i: integer;
+  begin
+    FreqArr := nil;
+    SetLength(FreqArr, 0);
+    freqMap := TStringList.Create;
+    try
+      freqMap.Sorted := True;
+      freqMap.Duplicates := dupIgnore;
+      p := 1;
+      token := '';
+      while p <= Length(Corpus) do
+      begin
+        {$NOTES OFF}
+        charLen := UTF8CodepointSize(@Corpus[p]);
+        {$NOTES ON}
+        if charLen = 0 then
+        begin
+          Inc(p);
+          Continue;
+        end;
+        ch := Copy(Corpus, p, charLen);
+        Inc(p, charLen);
+        if ((ch[1] >= 'A') and (ch[1] <= 'Z')) or ((ch[1] >= 'a') and (ch[1] <= 'z')) or (Ord(ch[1]) >= $C0) then
+          token := token + UTF8LowerCase(ch)
+        else
+        begin
+          if (UTF8Length(token) >= MinLen) and (UTF8Length(token) <= 30) and (token <> ExcludeWord) then
+          begin
+            idx := freqMap.IndexOf(token);
+            if idx >= 0 then
+              freqMap.Objects[idx] := TObject(PtrInt(freqMap.Objects[idx]) + 1)
+            else
+              freqMap.AddObject(token, TObject(1));
+          end;
+          token := '';
+        end;
+      end;
+      if (UTF8Length(token) >= MinLen) and (UTF8Length(token) <= 30) and (token <> ExcludeWord) then
+      begin
+        idx := freqMap.IndexOf(token);
+        if idx >= 0 then
+          freqMap.Objects[idx] := TObject(PtrInt(freqMap.Objects[idx]) + 1)
+        else
+          freqMap.AddObject(token, TObject(1));
+      end;
+
+      SetLength(FreqArr, freqMap.Count);
+      for i := 0 to freqMap.Count - 1 do
+      begin
+        FreqArr[i].W := freqMap[i];
+        FreqArr[i].C := PtrInt(freqMap.Objects[i]);
+      end;
+    finally
+      freqMap.Free;
+    end;
+  end;
+
+  // Custom comparer for tagged list
+  function CompareTagged(List: TStringList; Index1, Index2: integer): integer;
+  var
+    word1, word2: string;
+  begin
+    word1 := Copy(List[Index1], 1, Pos(#0, List[Index1]) - 1);
+    word2 := Copy(List[Index2], 1, Pos(#0, List[Index2]) - 1);
+    {$NOTES OFF}
+    Result := AnsiCompareStr(word1, word2);
+    {$NOTES ON}
+  end;
+
+  // Find words that appear in >= Threshold languages.
+  function FindCommonWordsWithThreshold(const AllWords: array of TWordFreqArray; Threshold: integer): TStringList;
+  var
+    taggedList: TStringList;
+    i, j, start, langCount: integer;
+    word, prevTag: string;
+  begin
+    Result := TStringList.Create;
+    Result.Sorted := True;
+    Result.Duplicates := dupIgnore;
+    if (Length(AllWords) = 0) or (Threshold < 2) then Exit;
+
+    taggedList := TStringList.Create;
+    try
+      // Build flat list "word#langIndex"
+      for i := 0 to High(AllWords) do
+        for j := 0 to High(AllWords[i]) do
+          taggedList.Add(AllWords[i][j].W + #0 + IntToStr(i));
+
+      taggedList.CustomSort(@CompareTagged);
+
+      start := 0;
+      while start < taggedList.Count do
+      begin
+        word := Copy(taggedList[start], 1, Pos(#0, taggedList[start]) - 1);
+        langCount := 1;
+        prevTag := taggedList[start];
+        for i := start + 1 to taggedList.Count - 1 do
+        begin
+          if Copy(taggedList[i], 1, Length(word)) = word then
+          begin
+            if taggedList[i] <> prevTag then
+            begin
+              Inc(langCount);
+              prevTag := taggedList[i];
+            end;
+          end
+          else
+            Break;
+        end;
+        if langCount >= Threshold then
+          Result.Add(word);
+        while (start < taggedList.Count) and (Copy(taggedList[start], 1, Length(word)) = word) do
+          Inc(start);
+      end;
+    finally
+      taggedList.Free;
+    end;
+  end;
+
 var
   corpusDir, outFile, txtFilePath, langCode, fullPath: string;
   sr: TSearchRec;
   validFiles: TStringList;
-  i, j, k, totalLangs, trigCount, codeLen, trigLen: integer;
+  i, j, k, totalLangs, trigCount, codeLen, trigLen, wordCount, wordLen: integer;
   fs: TFileStream;
   txtOut: TextFile;
   trigArray: TStringArray;
-  freqMap: TStringList;        // simple map trig -> count
+  freqMap: TStringList;
   weights: TTrigWeightArray = ();
   totalTrigrams, vocabSize: integer;
   logProb: double;
@@ -113,16 +277,28 @@ var
   TestMaxLen: integer;
   TestIter: integer;
   NumTrigrams: integer;
+  NumWords: integer;
+  MinWordLen: integer;
+  DedupThreshold: integer;
+  corpusText: string;
+  IsCJKLang: boolean;
+  AllWordLists: array of TWordFreqArray = nil;
+  FinalWords: array of TStringArray = nil;
+  FinalWeights: array of TWordWeightArray = nil;
+  CommonWords: TStringList;
+  DedupedList: TWordFreqArray = nil;
+  wIdx: integer;
 begin
-  // Default parameters
   TestMaxLen := DEF_TEST_MAXLEN;
   TestIter := DEF_TEST_ITER;
-  NumTrigrams := FINAL_TOP;
+  NumTrigrams := DEF_TRIG_TOP;
+  NumWords := DEF_WORD_TOP;
+  MinWordLen := DEF_MIN_WORD_LEN;
+  DedupThreshold := DEF_DEDUP_THRESHOLD;
 
   // Parse command line
   if ParamCount = 0 then
   begin
-    // No arguments -> test with default corpus .\corpus
     RunLanguageDetectionTest('.\corpus', TestMaxLen, TestIter);
     Halt;
   end;
@@ -130,13 +306,32 @@ begin
   if SameText(ParamStr(1), 'gen') then
   begin
     corpusDir := '.\corpus';
-    outFile   := '.\langprofiles.dat';
+    outFile := '.\langprofiles.dat';
     i := 2;
     while i <= ParamCount do
     begin
       if (ParamStr(i) = '-n') and (i + 1 <= ParamCount) then
       begin
-        NumTrigrams := StrToIntDef(ParamStr(i+1), NumTrigrams);
+        NumTrigrams := StrToIntDef(ParamStr(i + 1), NumTrigrams);
+        Inc(i, 2);
+        Continue;
+      end;
+      if (ParamStr(i) = '-w') and (i + 1 <= ParamCount) then
+      begin
+        NumWords := StrToIntDef(ParamStr(i + 1), NumWords);
+        Inc(i, 2);
+        Continue;
+      end;
+      if (ParamStr(i) = '-wl') and (i + 1 <= ParamCount) then
+      begin
+        MinWordLen := StrToIntDef(ParamStr(i + 1), MinWordLen);
+        Inc(i, 2);
+        Continue;
+      end;
+      if (ParamStr(i) = '-d') and (i + 1 <= ParamCount) then
+      begin
+        DedupThreshold := StrToIntDef(ParamStr(i + 1), DedupThreshold);
+        if DedupThreshold < 2 then DedupThreshold := 2;
         Inc(i, 2);
         Continue;
       end;
@@ -149,7 +344,6 @@ begin
   end
   else
   begin
-    // Test mode with optional custom max_len and iter
     if ParamCount >= 1 then
       TestMaxLen := StrToIntDef(ParamStr(1), TestMaxLen);
     if ParamCount >= 2 then
@@ -159,7 +353,6 @@ begin
     Halt;
   end;
 
-  // If we are here, GenMode is True – proceed with profile generation
   corpusDir := IncludeTrailingPathDelimiter(corpusDir);
   txtFilePath := ChangeFileExt(outFile, '.txt');
 
@@ -188,57 +381,64 @@ begin
   end;
   totalLangs := validFiles.Count;
 
+  // --- Phase 1: collect trigrams and word frequencies ---
+  SetLength(AllWordLists, totalLangs);
+  for i := 0 to totalLangs - 1 do
+    SetLength(AllWordLists[i], 0);
+
   AssignFile(txtOut, txtFilePath);
   Rewrite(txtOut);
   fs := TFileStream.Create(outFile, fmCreate);
   try
-    // Write magic to mark the file as compressed
     fs.WriteBuffer(MAGIC_COMPRESSED[0], SizeOf(MAGIC_COMPRESSED));
     fs.WriteBuffer(totalLangs, SizeOf(totalLangs));
+
     for i := 0 to totalLangs - 1 do
     begin
       langCode := validFiles[i];
       Write(Format('  [%d/%d] %s ...', [i + 1, totalLangs, langCode]));
       fullPath := corpusDir + langCode + '.txt';
 
-      // Load text and extract trigrams using the same function as the detector
       with TStringList.Create do
       begin
         LoadFromFile(fullPath, TEncoding.UTF8);
+        corpusText := Text;
         trigArray := langdetect.ExtractCharTrigrams(Text);
         Free;
       end;
 
       if trigArray = nil then
       begin
-        // Pack empty language block (codeLen, langCode, trigCount=0) and compress
-        begin
-          plainStream := TMemoryStream.Create;
-          try
-            codeLen := Length(langCode);
-            plainStream.WriteBuffer(codeLen, SizeOf(codeLen));
-            if codeLen > 0 then plainStream.WriteBuffer(langCode[1], codeLen);
-            trigCount := 0;
-            plainStream.WriteBuffer(trigCount, SizeOf(trigCount));
+        plainStream := TMemoryStream.Create;
+        try
+          codeLen := Length(langCode);
+          plainStream.WriteBuffer(codeLen, SizeOf(codeLen));
+          if codeLen > 0 then plainStream.WriteBuffer(langCode[1], codeLen);
+          trigCount := 0;
+          plainStream.WriteBuffer(trigCount, SizeOf(trigCount));
+          wordCount := 0;
+          plainStream.WriteBuffer(wordCount, SizeOf(wordCount));
 
-            comprStream := TOS.CompressMemoryStream(plainStream);
-            try
-              comprSize := comprStream.Size;
-              fs.WriteBuffer(comprSize, SizeOf(comprSize));
-              fs.CopyFrom(comprStream, comprSize);
-            finally
-              comprStream.Free;
-            end;
+          comprStream := TOS.CompressMemoryStream(plainStream);
+          try
+            comprSize := comprStream.Size;
+            fs.WriteBuffer(comprSize, SizeOf(comprSize));
+            fs.CopyFrom(comprStream, comprSize);
           finally
-            plainStream.Free;
+            comprStream.Free;
           end;
+        finally
+          plainStream.Free;
         end;
         Writeln(txtOut, langCode, ' =');
-        Writeln(' 0 trigrams');
+        if NumWords > 0 then
+          Writeln(' 0 trigrams, 0 words')
+        else
+          Writeln(' 0 trigrams');
         Continue;
       end;
 
-      // Count frequencies
+      // Trigrams
       freqMap := TStringList.Create;
       freqMap.Sorted := True;
       freqMap.Duplicates := dupIgnore;
@@ -253,8 +453,6 @@ begin
         Inc(totalTrigrams);
       end;
       vocabSize := freqMap.Count;
-
-      // Compute log probabilities with Laplace smoothing (for ordering only)
       SetLength(weights, freqMap.Count);
       for j := 0 to freqMap.Count - 1 do
       begin
@@ -263,60 +461,274 @@ begin
         weights[j].LogWeight := Round(logProb * LOG_SCALE);
       end;
       freqMap.Free;
-
-      // Sort by descending log-weight and keep top FINAL_TOP
       if Length(weights) > 1 then
         SortByWeight(weights, 0, High(weights));
       if Length(weights) > NumTrigrams then
         SetLength(weights, NumTrigrams);
-
       trigCount := Length(weights);
 
-      // Pack language binary data into a temporary stream and compress
+      // Collect words for later dedup (if enabled)
+      if NumWords > 0 then
       begin
-        plainStream := TMemoryStream.Create;
-        try
-          codeLen := Length(langCode);
-          plainStream.WriteBuffer(codeLen, SizeOf(codeLen));
-          if codeLen > 0 then plainStream.WriteBuffer(langCode[1], codeLen);
-          plainStream.WriteBuffer(trigCount, SizeOf(trigCount));
-          for j := 0 to trigCount - 1 do
-          begin
-            trigLen := Length(weights[j].Trig);
-            plainStream.WriteBuffer(trigLen, SizeOf(trigLen));
-            if trigLen > 0 then plainStream.WriteBuffer(weights[j].Trig[1], trigLen);
-            // Positional weight: most probable trigram gets highest value
-            posWeight := word(POS_WEIGHT_BASE - j);
-            plainStream.WriteBuffer(posWeight, SizeOf(posWeight));
-          end;
-
-          comprStream := TOS.CompressMemoryStream(plainStream);
-          try
-            comprSize := comprStream.Size;
-            fs.WriteBuffer(comprSize, SizeOf(comprSize));
-            fs.CopyFrom(comprStream, comprSize);
-          finally
-            comprStream.Free;
-          end;
-        finally
-          plainStream.Free;
-        end;
+        IsCJKLang := (langCode = 'zh') or (langCode = 'zh-CN') or (langCode = 'zh-TW') or (langCode = 'ja') or (langCode = 'ko');
+        if not IsCJKLang then
+          CollectWordsFiltered(corpusText, MinWordLen, UTF8LowerCase(langCode), AllWordLists[i]);
       end;
 
-      // Write text dump
+      // Write placeholder (words=0)
+      plainStream := TMemoryStream.Create;
+      try
+        codeLen := Length(langCode);
+        plainStream.WriteBuffer(codeLen, SizeOf(codeLen));
+        if codeLen > 0 then plainStream.WriteBuffer(langCode[1], codeLen);
+        plainStream.WriteBuffer(trigCount, SizeOf(trigCount));
+        for j := 0 to trigCount - 1 do
+        begin
+          trigLen := Length(weights[j].Trig);
+          plainStream.WriteBuffer(trigLen, SizeOf(trigLen));
+          if trigLen > 0 then plainStream.WriteBuffer(weights[j].Trig[1], trigLen);
+          posWeight := word(POS_WEIGHT_BASE - j);
+          plainStream.WriteBuffer(posWeight, SizeOf(posWeight));
+        end;
+        wordCount := 0;
+        plainStream.WriteBuffer(wordCount, SizeOf(wordCount));
+
+        comprStream := TOS.CompressMemoryStream(plainStream);
+        try
+          comprSize := comprStream.Size;
+          fs.WriteBuffer(comprSize, SizeOf(comprSize));
+          fs.CopyFrom(comprStream, comprSize);
+        finally
+          comprStream.Free;
+        end;
+      finally
+        plainStream.Free;
+      end;
+
       Write(txtOut, langCode, ' =');
       for j := 0 to trigCount - 1 do
         Write(txtOut, ' "', weights[j].Trig, '"');
       Writeln(txtOut);
-      Writeln(Format(' %d trigrams', [trigCount]));
+      if NumWords > 0 then
+        Writeln(Format(' %d trigrams, 0 words (pre-dedup)', [trigCount]))
+      else
+        Writeln(Format(' %d trigrams', [trigCount]));
     end;
+
+    // --- Phase 2: deduplicate words with threshold and rebuild file ---
+    if NumWords > 0 then
+    begin
+      CommonWords := FindCommonWordsWithThreshold(AllWordLists, DedupThreshold);
+      try
+        WriteLn(Format('Dedup: removed %d words appearing in >= %d languages.', [CommonWords.Count, DedupThreshold]));
+        WriteLn('Rebuilding final file...');
+
+        SetLength(FinalWords, totalLangs);
+        SetLength(FinalWeights, totalLangs);
+        for i := 0 to totalLangs - 1 do
+        begin
+          SetLength(FinalWords[i], 0);
+          SetLength(FinalWeights[i], 0);
+        end;
+
+        for i := 0 to totalLangs - 1 do
+        begin
+          if Length(AllWordLists[i]) = 0 then Continue;
+
+          SetLength(DedupedList, 0);
+          for j := 0 to High(AllWordLists[i]) do
+            if CommonWords.IndexOf(AllWordLists[i][j].W) < 0 then
+            begin
+              SetLength(DedupedList, Length(DedupedList) + 1);
+              DedupedList[High(DedupedList)] := AllWordLists[i][j];
+            end;
+
+          if Length(DedupedList) > 1 then
+            SortWordFreqArray(DedupedList, 0, High(DedupedList));
+
+          if Length(DedupedList) > NumWords then
+            SetLength(DedupedList, NumWords);
+
+          SetLength(FinalWords[i], Length(DedupedList));
+          SetLength(FinalWeights[i], Length(DedupedList));
+          for wIdx := 0 to High(DedupedList) do
+          begin
+            FinalWords[i][wIdx] := DedupedList[wIdx].W;
+            FinalWeights[i][wIdx] := word(POS_WEIGHT_BASE - wIdx);
+          end;
+        end;
+
+        // Close and reopen files
+        fs.Free;
+        CloseFile(txtOut);
+
+        fs := TFileStream.Create(outFile, fmCreate);
+        try
+          fs.WriteBuffer(MAGIC_COMPRESSED[0], SizeOf(MAGIC_COMPRESSED));
+          fs.WriteBuffer(totalLangs, SizeOf(totalLangs));
+
+          AssignFile(txtOut, txtFilePath);
+          Rewrite(txtOut);
+
+          for i := 0 to totalLangs - 1 do
+          begin
+            langCode := validFiles[i];
+            Write(Format('  [%d/%d] %s ...', [i + 1, totalLangs, langCode]));
+            fullPath := corpusDir + langCode + '.txt';
+
+            with TStringList.Create do
+            begin
+              LoadFromFile(fullPath, TEncoding.UTF8);
+              corpusText := Text;
+              trigArray := langdetect.ExtractCharTrigrams(Text);
+              Free;
+            end;
+
+            if trigArray = nil then
+            begin
+              plainStream := TMemoryStream.Create;
+              try
+                codeLen := Length(langCode);
+                plainStream.WriteBuffer(codeLen, SizeOf(codeLen));
+                if codeLen > 0 then plainStream.WriteBuffer(langCode[1], codeLen);
+                trigCount := 0;
+                plainStream.WriteBuffer(trigCount, SizeOf(trigCount));
+                wordCount := Length(FinalWords[i]);
+                plainStream.WriteBuffer(wordCount, SizeOf(wordCount));
+                for j := 0 to wordCount - 1 do
+                begin
+                  wordLen := Length(FinalWords[i][j]);
+                  plainStream.WriteBuffer(wordLen, SizeOf(wordLen));
+                  if wordLen > 0 then plainStream.WriteBuffer(FinalWords[i][j][1], wordLen);
+                  plainStream.WriteBuffer(FinalWeights[i][j], SizeOf(word));
+                end;
+
+                comprStream := TOS.CompressMemoryStream(plainStream);
+                try
+                  comprSize := comprStream.Size;
+                  fs.WriteBuffer(comprSize, SizeOf(comprSize));
+                  fs.CopyFrom(comprStream, comprSize);
+                finally
+                  comprStream.Free;
+                end;
+              finally
+                plainStream.Free;
+              end;
+              WriteLn(Format(' 0 trigrams, %d words', [wordCount]));
+              Writeln(txtOut, langCode, ' =');
+              if wordCount > 0 then
+              begin
+                Write(txtOut, langCode, ' =');
+                for j := 0 to wordCount - 1 do
+                  Write(txtOut, ' "', FinalWords[i][j], '"');
+                Writeln(txtOut);
+              end;
+              Continue;
+            end;
+
+            // Recompute trigrams for final file
+            freqMap := TStringList.Create;
+            freqMap.Sorted := True;
+            freqMap.Duplicates := dupIgnore;
+            totalTrigrams := 0;
+            for j := 0 to High(trigArray) do
+            begin
+              k := freqMap.IndexOf(trigArray[j]);
+              if k >= 0 then
+                freqMap.Objects[k] := TObject(PtrInt(freqMap.Objects[k]) + 1)
+              else
+                freqMap.AddObject(trigArray[j], TObject(1));
+              Inc(totalTrigrams);
+            end;
+            vocabSize := freqMap.Count;
+            SetLength(weights, freqMap.Count);
+            for j := 0 to freqMap.Count - 1 do
+            begin
+              logProb := ln((PtrInt(freqMap.Objects[j]) + 1) / (totalTrigrams + vocabSize));
+              weights[j].Trig := freqMap[j];
+              weights[j].LogWeight := Round(logProb * LOG_SCALE);
+            end;
+            freqMap.Free;
+            if Length(weights) > 1 then
+              SortByWeight(weights, 0, High(weights));
+            if Length(weights) > NumTrigrams then
+              SetLength(weights, NumTrigrams);
+            trigCount := Length(weights);
+
+            plainStream := TMemoryStream.Create;
+            try
+              codeLen := Length(langCode);
+              plainStream.WriteBuffer(codeLen, SizeOf(codeLen));
+              if codeLen > 0 then plainStream.WriteBuffer(langCode[1], codeLen);
+              plainStream.WriteBuffer(trigCount, SizeOf(trigCount));
+              for j := 0 to trigCount - 1 do
+              begin
+                trigLen := Length(weights[j].Trig);
+                plainStream.WriteBuffer(trigLen, SizeOf(trigLen));
+                if trigLen > 0 then plainStream.WriteBuffer(weights[j].Trig[1], trigLen);
+                posWeight := word(POS_WEIGHT_BASE - j);
+                plainStream.WriteBuffer(posWeight, SizeOf(posWeight));
+              end;
+
+              wordCount := Length(FinalWords[i]);
+              plainStream.WriteBuffer(wordCount, SizeOf(wordCount));
+              for j := 0 to wordCount - 1 do
+              begin
+                wordLen := Length(FinalWords[i][j]);
+                plainStream.WriteBuffer(wordLen, SizeOf(wordLen));
+                if wordLen > 0 then plainStream.WriteBuffer(FinalWords[i][j][1], wordLen);
+                plainStream.WriteBuffer(FinalWeights[i][j], SizeOf(word));
+              end;
+
+              comprStream := TOS.CompressMemoryStream(plainStream);
+              try
+                comprSize := comprStream.Size;
+                fs.WriteBuffer(comprSize, SizeOf(comprSize));
+                fs.CopyFrom(comprStream, comprSize);
+              finally
+                comprStream.Free;
+              end;
+            finally
+              plainStream.Free;
+            end;
+
+            WriteLn(Format(' %d trigrams, %d words', [trigCount, wordCount]));
+            Write(txtOut, langCode, ' =');
+            for j := 0 to trigCount - 1 do
+              Write(txtOut, ' "', weights[j].Trig, '"');
+            Writeln(txtOut);
+            if wordCount > 0 then
+            begin
+              Write(txtOut, langCode, ' =');
+              for j := 0 to wordCount - 1 do
+                Write(txtOut, ' "', FinalWords[i][j], '"');
+              Writeln(txtOut);
+            end;
+          end;
+        finally
+          fs.Free;
+        end;
+      finally
+        CommonWords.Free;
+      end;
+    end
+    else
+    begin
+      // NumWords = 0: nothing to do
+      CloseFile(txtOut);
+    end;
+
     Writeln('Done. Profiles saved to ', outFile);
     Writeln('Text dump saved to ', txtFilePath);
     WriteLn('Press any key to exit (ESC to quit)...');
     WaitForEsc;
   finally
-    CloseFile(txtOut);
-    fs.Free;
+    // txtOut already closed in Phase2 or above; but to be safe, if an exception occurs we close it
+    // We use a try/finally, but we may have already closed it. We'll just ignore error on double close
+    try
+      CloseFile(txtOut);
+    except
+    end;
+    validFiles.Free;
   end;
-  validFiles.Free;
 end.

@@ -5,25 +5,26 @@
 [![Platform: Windows Linux](https://img.shields.io/badge/Platform-Windows_Linux-yellow)](#)
 [![Latest Release](https://img.shields.io/github/v/release/plainlib/langprofiles?label=Release)](https://github.com/plainlib/langprofiles/releases/latest)
 
-A command-line tool that reads a directory of UTF-8 text corpora (one file per language)
+A command‑line tool that reads a directory of UTF‑8 text corpora (one file per language)
 and produces a compact binary profile file used for fast language detection.
 Also includes a built‑in test mode to evaluate detection accuracy on the same corpora.
 
 ## Features
 
 - Processes any number of languages from plain `.txt` files.
-- Cleans and normalises text: collapses whitespace, keeps letters from many scripts
-  (Latin, Cyrillic, Arabic, CJK, Thai, etc.), lowercases everything.
 - Extracts character trigrams (three consecutive Unicode codepoints) and computes
   their log‑probabilities using Laplace smoothing.
-- Keeps only the most characteristic trigrams (`FINAL_TOP = 600`) and assigns each
-  a positional weight – the most probable trigram gets the highest weight.
+- Keeps only the top **N** most characteristic trigrams (default 800) and assigns each
+  a positional weight – the most probable trigram gets the highest weight (60000).
+- For non‑CJK languages, extracts frequent words, removes words that appear in several
+  languages (deduplication), and stores the top **W** unique words (default 1000)
+  with positional weights.
 - Compresses the binary data with **zlib (deflate)** to reduce file size by 3–5×
   without any noticeable runtime overhead during decompression.
-- Writes the profile in a self‑describing format that can be optionally read by
-  the detection library.
-- Also generates a human‑readable text dump (`.txt`) with the list of selected trigrams
-  for each language.
+- Writes the profile in a self‑describing format that can be read by the
+  detection library.
+- Also generates a human‑readable text dump (`.txt`) listing the selected trigrams
+  and words for each language.
 - Test mode runs `DetectLanguageWithConfidence` on the corpus files and reports accuracy.
 
 ## Binary File Format
@@ -34,7 +35,7 @@ All integers are little‑endian.
 
 | Offset | Field | Type | Description |
 |--------|-------|------|-------------|
-| 0 | Magic | 4 bytes | `GPRO` signature (always present for files created by this tool, marks compressed format) |
+| 0 | Magic | 4 bytes | `GPRO` signature (always present for compressed format) |
 | 4 | TotalLanguages | Integer | Number of language entries |
 | 8 | LanguageBlocks | sequence | For each language: CompressedSize (Cardinal) followed by compressed data |
 
@@ -53,10 +54,16 @@ otherwise fall back to the legacy uncompressed layout.
 | +0 | TrigLen | Integer | Length of the trigram string |
 | +4 | Trigram | UTF‑8 bytes | The trigram itself |
 | +4 + TrigLen | Weight | Word | Positional weight (most frequent trigram = 60000, second = 59999, …) |
+| After trigrams | WordCount | Integer | Number of frequent unique words (0 for CJK languages or when words disabled) |
+| | *For each word:* | | |
+| +0 | WordLen | Integer | Length of the word string |
+| +4 | Word | UTF‑8 bytes | The word (lowercased) |
+| +4 + WordLen | Weight | Word | Positional weight (most frequent unique word = 60000, …) |
 
 ## Requirements
 
-- [Free Pascal Compiler](https://www.freepascal.org/) 3.2.2 or later (Lazarus IDE optional)
+- [Lazarus](https://www.lazarus-ide.org/) 4.8 or later
+- [Free Pascal Compiler](https://www.freepascal.org/) 3.2.2 or later
 - Packages: `Classes`, `SysUtils`, `PasZLib`, `LazUTF8` (all ship with Lazarus/FPC)
 - Input corpora must be UTF‑8 encoded `.txt` files, at least `MIN_TEXT_LENGTH` (10000) characters long.
 
@@ -89,40 +96,47 @@ function. It reports per‑file results and overall accuracy.
 ### Generation mode
 
 ```bash
-langprofiles gen                            # generate with default paths and 600 trigrams
+langprofiles gen                            # generate with default paths and settings
 langprofiles gen -n 800                     # custom trigram count, default paths
-langprofiles gen <corpus_dir> <out_file>    # custom paths, 600 trigrams
-langprofiles gen <corpus_dir> <out_file> -n 800  # custom paths and trigram count
+langprofiles gen <corpus_dir> <out_file>    # custom paths, default settings
+langprofiles gen -n 800 -w 500 -wl 3 -d 2  # full customisation
 ```
 
-- `corpus_dir` – directory containing one `.txt` file per language.
-  The file name (without extension) is used as the language code (e.g., `en.txt` → code `en`).
-- `out_file` – path to the generated binary profile (e.g., `profiles.bin`).
-  A text dump with the same name but `.txt` extension is created alongside.
-- `-n <number>` – (optional) number of top trigrams to keep per language (default: 600).
-  Higher values increase profile size and detection accuracy; lower values reduce size but may miss rare features.
-  Example: `-n 1000` stores the 1000 most frequent trigrams.
+**Parameters:**
 
-Defaults:
-- corpus directory: `.\corpus`
-- output file: `.\langprofiles.dat` (and `.\langprofiles.txt` for the text dump)
-- trigrams per language: 600
+| Flag | Description | Default |
+|------|-------------|---------|
+| `corpus_dir` | Directory with one `.txt` file per language | `.\corpus` |
+| `out_file`   | Path to the generated binary profile | `.\langprofiles.dat` |
+| `-n <N>`     | Number of top trigrams to keep per language | `800` |
+| `-w <W>`     | Maximum number of frequent words to keep per language | `1000` |
+| `-wl <L>`    | Minimum word length (shorter words are ignored) | `4` |
+| `-d <D>`     | Deduplication threshold – remove words that appear in **D** or more languages | `3` |
 
-**Example:**
+All parameters after `gen` can appear in any order. The first unrecognised argument is treated
+as `corpus_dir`, the second as `out_file`. After that, `-n`, `-w`, `-wl`, `-d` are consumed.
+
+**Examples:**
 
 ```bash
-langprofiles gen ./corpora ./profiles.bin
+# Default generation (800 trigrams, 1000 words, min word length 4, dedup threshold 3)
+langprofiles gen
+
+# Custom trigram and word counts, more aggressive deduplication
+langprofiles gen -n 600 -w 500 -d 2
+
+# Everything custom, words of length 3 allowed
+langprofiles gen ./corpora ./out.bin -n 800 -w 500 -wl 3 -d 2
 ```
 
-Output:
+**How words are selected (deduplication):**
 
-```
-  [1/5] en ...  600 trigrams
-  [2/5] de ...  598 trigrams
-  ...
-Done. Profiles saved to ./profiles.bin
-Text dump saved to ./profiles.txt
-```
+1. For each non‑CJK language, all words of length ≥ `-wl` are collected from the corpus.
+2. Words that appear in **≥ `-d`** different languages are considered “common” and removed from all profiles.
+3. The remaining unique words are sorted by frequency within each language, and the top `-w` words are kept (fewer if not enough remain).
+4. Each selected word gets a positional weight: the most frequent gets 60000, the next 59999, etc.
+
+CJK languages (zh, ja, ko, etc.) skip word extraction entirely; their word list is empty.
 
 ## Building
 
@@ -136,23 +150,20 @@ Or open `langprofiles.lpr` in Lazarus and build as a console application.
 
 No external dependencies beyond the standard Free Pascal libraries.
 
-## How It Works
+## How It Works (Two‑Phase Generation)
 
-1. **Scan** the input directory for `.txt` files, skip any corpus shorter than 10 000 codepoints.
-2. For each language:
-   - Load the text, clean and normalise it (whitespace collapsing, script filtering, lowercasing).
-   - Extract all overlapping character trigrams.
-   - Count trigram frequencies.
-   - Compute Laplace‑smoothed log‑probabilities, sort trigrams by descending probability.
-   - Keep the top `FINAL_TOP` (600) trigrams and assign weights:  
-     `weight = POS_WEIGHT_BASE – rank` (so the most frequent trigram gets 60000, the second 59999, …).
-3. **Pack** the language data (code, trigram count, trigrams and weights) into a memory stream.
-4. **Compress** that stream with `zlib` (deflate) and prepend a 4‑byte original size.
-5. **Write** the magic signature, total language count, and for each language the compressed size
-   followed by the compressed block.
-6. **Text dump** is written in parallel as a plain list of selected trigrams per language.
+### Phase 1 – Initial collection
+- For each language, trigrams are extracted and immediately written to a temporary file (words = 0).
+- At the same time, all candidate words are collected and saved in memory.
 
-Compression typically reduces the profile file size by 3–5×, making distribution and loading faster.
+### Phase 2 – Deduplication and final output
+- The tool scans all collected word lists to find words present in ≥ `-d` languages.
+- Those common words are discarded.
+- For each language, the remaining words are sorted by frequency, truncated to `-w`, and assigned positional weights.
+- The final profile is rebuilt: trigrams are re‑extracted (to ensure consistency) and written together with the filtered word list.
+- The output file and text dump are overwritten with the complete data.
+
+This approach guarantees that the stored words are both frequent **and** highly distinctive for their language, greatly improving detection accuracy on short texts.
 
 ## License
 
