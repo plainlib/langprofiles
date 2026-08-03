@@ -796,7 +796,7 @@ end;
 // and then uses unique characters or high-frequency words to decide.
 procedure ApplyPostCorrection(var Code: string; var Confidence: double; const AText: string);
 var
-  TwScore, CnScore: integer;
+  TwScore, CnScore, KuScore: integer;
 
 // Check if a word exists with word boundaries (space or start/end of string).
   function HasWord(const word: string): boolean;
@@ -907,6 +907,56 @@ begin
       Confidence := 1.0;
       Exit;
     end;
+  end;
+  {%EndRegion}
+
+  {%Region -fold Kurdish vs Turkish, Hausa and others}
+  if (Code = 'ku') or (Code = 'tr') or (Code = 'ha') or (Code = 'id') then
+  begin
+    KuScore := 0;
+
+    // Kurdish-only letters (Kurmanji Latin alphabet)
+    Inc(KuScore, Ord(Pos('ê', AText) > 0));
+    Inc(KuScore, Ord(Pos('î', AText) > 0));
+    Inc(KuScore, Ord(Pos('û', AText) > 0));
+    Inc(KuScore, Ord(Pos('Ê', AText) > 0));
+    Inc(KuScore, Ord(Pos('Î', AText) > 0));
+    Inc(KuScore, Ord(Pos('Û', AText) > 0));
+
+    // Very characteristic Kurdish digraphs
+    Inc(KuScore, Ord(Pos('ev', AText) > 0));
+    Inc(KuScore, Ord(Pos('ew', AText) > 0));
+    Inc(KuScore, Ord(Pos('xw', AText) > 0));
+
+    // Strong Kurdish words
+    Inc(KuScore, Ord(HasWord('xwe')));
+    Inc(KuScore, Ord(HasWord('heye')));
+    Inc(KuScore, Ord(HasWord('gelek')));
+    Inc(KuScore, Ord(HasWord('kirin')));
+    Inc(KuScore, Ord(HasWord('çawa')));
+    Inc(KuScore, Ord(HasWord('çend')));
+    Inc(KuScore, Ord(HasWord('hinek')));
+    Inc(KuScore, Ord(HasWord('rojbaş')));
+    Inc(KuScore, Ord(HasWord('baş')));
+
+    // Require at least two independent Kurdish signals
+    if KuScore >= 2 then
+    begin
+      Code := 'ku';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Turkish-only letters
+    if (Pos('ı', AText) > 0) or (Pos('ğ', AText) > 0) then
+    begin
+      Code := 'tr';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    if Code = 'ku' then
+      Confidence := 0.5;
   end;
   {%EndRegion}
 
@@ -1040,10 +1090,9 @@ begin
       Exit;
     end;
 
-    // Serbian unique letters (Cyrillic)
-    if (Pos('ђ', AText) > 0) or (Pos('ћ', AText) > 0) or (Pos('љ', AText) > 0) or (Pos('њ', AText) > 0) or
-      (Pos('џ', AText) > 0) or (Pos('Ђ', AText) > 0) or (Pos('Ћ', AText) > 0) or (Pos('Љ', AText) > 0) or
-      (Pos('Њ', AText) > 0) or (Pos('Џ', AText) > 0) then
+    // Serbian unique letters (Cyrillic) – only letters NOT used in Macedonian
+    if (Pos('ђ', AText) > 0) or (Pos('ћ', AText) > 0) or (Pos('џ', AText) > 0) or (Pos('Ђ', AText) > 0) or
+      (Pos('Ћ', AText) > 0) or (Pos('Џ', AText) > 0) then
     begin
       Code := 'sr';
       Confidence := 1.0;
@@ -1103,8 +1152,7 @@ begin
     end;
 
     // Lower confidence for sr and mk if no language-specific letters are present
-    if (Code = 'sr') and (Pos('ђ', AText) = 0) and (Pos('ћ', AText) = 0) and (Pos('љ', AText) = 0) and
-      (Pos('њ', AText) = 0) and (Pos('џ', AText) = 0) and (Pos('ј', AText) = 0) then
+    if (Code = 'sr') and (Pos('ђ', AText) = 0) and (Pos('ћ', AText) = 0) and (Pos('џ', AText) = 0) and (Pos('ј', AText) = 0) then
       Confidence := 0.4;
 
     if (Code = 'mk') and (Pos('ѓ', AText) = 0) and (Pos('ќ', AText) = 0) and (Pos('ѕ', AText) = 0) then
@@ -1430,7 +1478,6 @@ begin
   {%EndRegion}
 
   {%Region -fold Hebrew script: Hebrew vs Yiddish}
-  // Hebrew (he/iw) vs Yiddish (yi) – both use the Hebrew script
   if (Code = 'he') or (Code = 'iw') or (Code = 'yi') then
   begin
     // Yiddish unique ligatures: tsvey vovn (װ), vav yud (ױ), tsvey yudn (ײ)
@@ -1441,30 +1488,30 @@ begin
       Exit;
     end;
 
-    // Apostrophe forms are extremely common in Yiddish
-    if (Pos('מ''', AText) > 0) or (Pos('ס''', AText) > 0) or (Pos('ר''', AText) > 0) or (Pos('כ''', AText) > 0) then
+    // If we see strong Hebrew markers, never switch to Yiddish
+    if (Pos('את ', AText) > 0) or (Pos('על ', AText) > 0) or (Pos('לא ', AText) > 0) or
+      (Pos('של ', AText) > 0) or (Pos('הוא ', AText) > 0) or (Pos('היא ', AText) > 0) then
     begin
-      Code := 'yi';
-      Confidence := 0.98;
+      // Definitely Hebrew – keep the code (he/iw) and raise confidence slightly
+      if (Code = 'he') or (Code = 'iw') then
+        Confidence := 0.95;
+      // If Code was 'yi', switch to 'he'
+      if Code = 'yi' then
+      begin
+        Code := 'he';
+        Confidence := 0.95;
+      end;
       Exit;
     end;
 
-    // Frequent Yiddish words
+    // Frequent Yiddish words (with spaces) – only raise confidence moderately
     if (Pos(' און ', AText) > 0) or (Pos(' איך ', AText) > 0) or (Pos(' נישט ', AText) > 0) or
       (Pos(' דאס ', AText) > 0) or (Pos(' איז ', AText) > 0) or (Pos(' מיט ', AText) > 0) or
       (Pos(' פון ', AText) > 0) or (Pos(' צו ', AText) > 0) or (Pos(' מען ', AText) > 0) or
       (Pos(' זייער ', AText) > 0) or (Pos(' שוין ', AText) > 0) then
     begin
       Code := 'yi';
-      Confidence := 0.95;
-      Exit;
-    end;
-
-    // Common Yiddish endings
-    if (Pos('ונג', AText) > 0) or (Pos('קייט', AText) > 0) or (Pos('לעך', AText) > 0) then
-    begin
-      Code := 'yi';
-      Confidence := 0.90;
+      Confidence := 0.70;   // reduced from 0.95 to lower false positives
       Exit;
     end;
 
