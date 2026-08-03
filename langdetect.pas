@@ -51,26 +51,56 @@ type
     stHebrew,
     stCJK,
     stDevanagari,
+    stBengali,
+    stGurmukhi,
+    stGujarati,
+    stOriya,
+    stTamil,
+    stTelugu,
+    stKannada,
+    stMalayalam,
+    stSinhala,
+    stThai,
+    stLao,
+    stMyanmar,
+    stKhmer,
+    stTibetan,
+    stGeorgian,
+    stArmenian,
+    stEthiopic,
     stOther
     );
 
   TScriptInfo = record
     Script: TScriptType;
-
     Latin: integer;
     Cyrillic: integer;
     Arabic: integer;
-
     Han: integer;
     Hiragana: integer;
     Katakana: integer;
     Hangul: integer;
-
     Greek: integer;
     Hebrew: integer;
     Devanagari: integer;
+    Bengali: integer;
+    Gurmukhi: integer;
+    Gujarati: integer;
+    Oriya: integer;
+    Tamil: integer;
+    Telugu: integer;
+    Kannada: integer;
+    Malayalam: integer;
+    Sinhala: integer;
+    Thai: integer;
+    Lao: integer;
+    Myanmar: integer;
+    Khmer: integer;
+    Tibetan: integer;
+    Georgian: integer;
+    Armenian: integer;
+    Ethiopic: integer;
     Other: integer;
-
     Total: integer;
   end;
 
@@ -102,8 +132,7 @@ implementation
 
 {%Region -fold Private Methods}
 
-// Analyse the script composition of the first 300 characters.
-// Returns detailed counts for Latin, Cyrillic, CJK sub‑ranges, etc.
+// Script detection by text
 function DetectScript(const Txt: string): TScriptInfo;
 const
   SAMPLE_SIZE = 300;
@@ -118,13 +147,11 @@ begin
   Result.Script := stOther;
 
   p := 1;
-
   while (p <= Length(Txt)) and (Result.Total < SAMPLE_SIZE) do
   begin
     {$NOTES OFF}
     CharLen := UTF8CodepointSize(@Txt[p]);
     {$NOTES ON}
-
     if CharLen = 0 then
     begin
       Inc(p);
@@ -134,11 +161,8 @@ begin
     ch := Copy(Txt, p, CharLen);
     Inc(p, CharLen);
 
-    if ch = ' ' then
-      Continue;
-
-    if ((ch[1] >= '0') and (ch[1] <= '9')) then
-      Continue;
+    if ch = ' ' then Continue;
+    if ((ch[1] >= '0') and (ch[1] <= '9')) then Continue;
 
     Inc(Result.Total);
 
@@ -152,53 +176,180 @@ begin
 
     // Extended Latin
     if ((cp >= $00C0) and (cp <= $024F)) or ((cp >= $1E00) and (cp <= $1EFF)) or ((cp >= $2C60) and (cp <= $2C7F)) then
-    begin
-      Inc(Result.Latin);
-    end
-
+      Inc(Result.Latin)
     // Cyrillic
     else if (cp >= $0400) and (cp <= $04FF) then
       Inc(Result.Cyrillic)
-
     // Arabic
     else if ((cp >= $0600) and (cp <= $06FF)) or ((cp >= $0750) and (cp <= $077F)) then
       Inc(Result.Arabic)
-
-    // Han (Chinese ideographs)
+    // Han
     else if ((cp >= $3400) and (cp <= $4DBF)) or ((cp >= $4E00) and (cp <= $9FFF)) or ((cp >= $20000) and (cp <= $2A6DF)) then
       Inc(Result.Han)
-
     // Hiragana
     else if (cp >= $3040) and (cp <= $309F) then
       Inc(Result.Hiragana)
-
     // Katakana
     else if (cp >= $30A0) and (cp <= $30FF) then
       Inc(Result.Katakana)
-
     // Hangul
     else if (cp >= $AC00) and (cp <= $D7AF) then
       Inc(Result.Hangul)
-
     // Greek
     else if (cp >= $0370) and (cp <= $03FF) then
       Inc(Result.Greek)
-
     // Hebrew
     else if (cp >= $0590) and (cp <= $05FF) then
       Inc(Result.Hebrew)
-
     // Devanagari
     else if (cp >= $0900) and (cp <= $097F) then
       Inc(Result.Devanagari)
-
+    // Bengali (includes Assamese)
+    else if (cp >= $0980) and (cp <= $09FF) then
+      Inc(Result.Bengali)
+    // Gurmukhi (Punjabi)
+    else if (cp >= $0A00) and (cp <= $0A7F) then
+      Inc(Result.Gurmukhi)
+    // Gujarati
+    else if (cp >= $0A80) and (cp <= $0AFF) then
+      Inc(Result.Gujarati)
+    // Oriya
+    else if (cp >= $0B00) and (cp <= $0B7F) then
+      Inc(Result.Oriya)
+    // Tamil
+    else if (cp >= $0B80) and (cp <= $0BFF) then
+      Inc(Result.Tamil)
+    // Telugu
+    else if (cp >= $0C00) and (cp <= $0C7F) then
+      Inc(Result.Telugu)
+    // Kannada
+    else if (cp >= $0C80) and (cp <= $0CFF) then
+      Inc(Result.Kannada)
+    // Malayalam
+    else if (cp >= $0D00) and (cp <= $0D7F) then
+      Inc(Result.Malayalam)
+    // Sinhala
+    else if (cp >= $0D80) and (cp <= $0DFF) then
+      Inc(Result.Sinhala)
+    // Thai
+    else if (cp >= $0E00) and (cp <= $0E7F) then
+      Inc(Result.Thai)
+    // Lao
+    else if (cp >= $0E80) and (cp <= $0EFF) then
+      Inc(Result.Lao)
+    // Myanmar
+    else if (cp >= $1000) and (cp <= $109F) then
+      Inc(Result.Myanmar)
+    // Khmer
+    else if (cp >= $1780) and (cp <= $17FF) then
+      Inc(Result.Khmer)
+    // Georgian
+    else if (cp >= $10A0) and (cp <= $10FF) then
+      Inc(Result.Georgian)
+    // Armenian
+    else if (cp >= $0530) and (cp <= $058F) then
+      Inc(Result.Armenian)
+    // Ethiopic (Amharic, etc.)
+    else if (cp >= $1200) and (cp <= $137F) then
+      Inc(Result.Ethiopic)
+    // Tibetan
+    else if (cp >= $0F00) and (cp <= $0FFF) then
+      Inc(Result.Tibetan)
     else
       Inc(Result.Other);
   end;
 
   if Result.Total = 0 then
   begin
-    Result.Script := stOther;   // keep script explicit for compiler hint
+    Result.Script := stOther;
+    Exit;
+  end;
+
+  // Determine dominant script (ordered by specificity: non-Latin scripts first)
+  if Result.Bengali / Result.Total > 0.50 then
+  begin
+    Result.Script := stBengali;
+    Exit;
+  end;
+  if Result.Gurmukhi / Result.Total > 0.50 then
+  begin
+    Result.Script := stGurmukhi;
+    Exit;
+  end;
+  if Result.Gujarati / Result.Total > 0.50 then
+  begin
+    Result.Script := stGujarati;
+    Exit;
+  end;
+  if Result.Oriya / Result.Total > 0.50 then
+  begin
+    Result.Script := stOriya;
+    Exit;
+  end;
+  if Result.Tamil / Result.Total > 0.50 then
+  begin
+    Result.Script := stTamil;
+    Exit;
+  end;
+  if Result.Telugu / Result.Total > 0.50 then
+  begin
+    Result.Script := stTelugu;
+    Exit;
+  end;
+  if Result.Kannada / Result.Total > 0.50 then
+  begin
+    Result.Script := stKannada;
+    Exit;
+  end;
+  if Result.Malayalam / Result.Total > 0.50 then
+  begin
+    Result.Script := stMalayalam;
+    Exit;
+  end;
+  if Result.Sinhala / Result.Total > 0.50 then
+  begin
+    Result.Script := stSinhala;
+    Exit;
+  end;
+  if Result.Thai / Result.Total > 0.50 then
+  begin
+    Result.Script := stThai;
+    Exit;
+  end;
+  if Result.Lao / Result.Total > 0.50 then
+  begin
+    Result.Script := stLao;
+    Exit;
+  end;
+  if Result.Myanmar / Result.Total > 0.50 then
+  begin
+    Result.Script := stMyanmar;
+    Exit;
+  end;
+  if Result.Khmer / Result.Total > 0.50 then
+  begin
+    Result.Script := stKhmer;
+    Exit;
+  end;
+  if Result.Georgian / Result.Total > 0.50 then
+  begin
+    Result.Script := stGeorgian;
+    Exit;
+  end;
+  if Result.Armenian / Result.Total > 0.50 then
+  begin
+    Result.Script := stArmenian;
+    Exit;
+  end;
+  if Result.Ethiopic / Result.Total > 0.50 then
+  begin
+    Result.Script := stEthiopic;
+    Exit;
+  end;
+
+  if Result.Tibetan / Result.Total > 0.50 then
+  begin
+    Result.Script := stTibetan;
     Exit;
   end;
 
@@ -247,118 +398,6 @@ begin
   Result.Script := stOther;
 end;
 
-// Checks if language code matches current script
-function IsLanguageMatchingScript(const Code: string; Script: TScriptType): boolean;
-begin
-  case Script of
-    stLatin:
-      // All codes are allowed EXCEPT those known to be non-Latin scripts
-      Result := not ((Code = 'ru') or (Code = 'uk') or (Code = 'be') or (Code = 'bg') or (Code = 'sr') or
-        (Code = 'mk') or (Code = 'kk') or (Code = 'ky') or (Code = 'mn') or   // Cyrillic (may add more if needed)
-        (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or (Code = 'ug') or // Arabic
-        (Code = 'el') or   // Greek
-        (Code = 'he') or (Code = 'iw') or (Code = 'yi') or // Hebrew
-        (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') or   // Devanagari
-        (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko') or // CJK
-        (Code = 'am') or (Code = 'as') or (Code = 'bn') or (Code = 'gu') or (Code = 'kn') or (Code = 'ml') or
-        (Code = 'or') or (Code = 'pa') or (Code = 'ta') or (Code = 'te') or (Code = 'th') or (Code = 'lo') or
-        (Code = 'my') or (Code = 'km') or (Code = 'si') or (Code = 'ka') or (Code = 'hy')   // scripts not Latin (Ge'ez, Indic, Thai, etc.)
-        );
-    stCyrillic:
-      // For Cyrillic, allow all except known non-Cyrillic
-      Result := not ((Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or
-        (Code = 'ug') or (Code = 'el') or (Code = 'he') or (Code = 'iw') or (Code = 'yi') or (Code = 'hi') or
-        (Code = 'mr') or (Code = 'ne') or (Code = 'sa') or (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or
-        (Code = 'ja') or (Code = 'ko') or (Code = 'am') or (Code = 'as') or (Code = 'bn') or (Code = 'gu') or
-        (Code = 'kn') or (Code = 'ml') or (Code = 'or') or (Code = 'pa') or (Code = 'ta') or (Code = 'te') or
-        (Code = 'th') or (Code = 'lo') or (Code = 'my') or (Code = 'km') or (Code = 'si') or (Code = 'ka') or
-        (Code = 'hy') or (Code = 'en') or (Code = 'de') or (Code = 'fr') or // Latin family
-        (Code = 'es') or (Code = 'pt') or (Code = 'it') or (Code = 'nl') or (Code = 'sv') or (Code = 'no') or
-        (Code = 'da') or (Code = 'fi') or (Code = 'hu') or (Code = 'ro') or (Code = 'cs') or (Code = 'pl') or
-        (Code = 'tr') or (Code = 'id') or (Code = 'ms') or (Code = 'vi') or (Code = 'sk') or (Code = 'sl') or
-        (Code = 'hr') or (Code = 'lt') or (Code = 'lv'));
-    stArabic:
-      Result := not ((Code = 'ru') or (Code = 'uk') or (Code = 'be') or (Code = 'bg') or (Code = 'sr') or
-        (Code = 'mk') or (Code = 'kk') or (Code = 'ky') or (Code = 'mn') or (Code = 'el') or (Code = 'he') or
-        (Code = 'iw') or (Code = 'yi') or (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') or
-        (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko') or (Code = 'am') or
-        (Code = 'as') or (Code = 'bn') or (Code = 'gu') or (Code = 'kn') or (Code = 'ml') or (Code = 'or') or
-        (Code = 'pa') or (Code = 'ta') or (Code = 'te') or (Code = 'th') or (Code = 'lo') or (Code = 'my') or
-        (Code = 'km') or (Code = 'si') or (Code = 'ka') or (Code = 'hy') or (Code = 'en') or (Code = 'de') or
-        (Code = 'fr') or (Code = 'es') or (Code = 'pt') or (Code = 'it') or (Code = 'nl') or (Code = 'sv') or
-        (Code = 'no') or (Code = 'da') or (Code = 'fi') or (Code = 'hu') or (Code = 'ro') or (Code = 'cs') or
-        (Code = 'pl') or (Code = 'tr') or (Code = 'id') or (Code = 'ms') or (Code = 'vi') or (Code = 'sk') or
-        (Code = 'sl') or (Code = 'hr') or (Code = 'lt') or (Code = 'lv'));
-    stGreek: Result := (Code = 'el');
-    stHebrew: Result := (Code = 'he') or (Code = 'iw') or (Code = 'yi');
-    stDevanagari:
-      Result := (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa');
-    stCJK: Result := (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko');
-    else
-      Result := True;
-  end;
-end;
-
-//  Check if a UTF-8 character is in the CJK (Chinese/Japanese/Korean) range
-function IsCJK(const s: string): boolean;
-var
-  cp: UCS4Char;
-  CharLen: integer;
-begin
-  if s = '' then Exit(False);
-  CharLen := 0;
-  cp := UTF8CodepointToUnicode(@s[1], CharLen);
-  Result :=
-    // CJK Unified Ideographs (Chinese)
-    ((cp >= $4E00) and (cp <= $9FFF)) or ((cp >= $3400) and (cp <= $4DBF)) or ((cp >= $20000) and (cp <= $2A6DF)) or
-    // Hiragana & Katakana (Japanese)
-    ((cp >= $3040) and (cp <= $30FF)) or
-    // Hangul Syllables (Korean)
-    ((cp >= $AC00) and (cp <= $D7AF));
-end;
-
-// Frequency-aware distance (lower = better).
-// For each trigram of the text, if found in profile, adds a negative penalty
-// proportional to its frequency (or rank). Missing trigrams add a fixed positive penalty.
-function DistanceToProfile(const TextTrigrams: TStringArray; const Profile: TProfile): double;
-const
-  MISSING_PENALTY = 100;               // penalty for a trigram not found
-  MAX_POS_WEIGHT = 100;               // used when Freqs are not available
-var
-  i, j: integer;
-  score: integer;                      // total accumulated score (negative = good)
-  freq: integer;
-  tested: integer;
-begin
-  score := 0;
-  tested := 0;
-  for i := 0 to High(TextTrigrams) do
-  begin
-    freq := -1;                        // -1 means not found
-    for j := 0 to High(Profile.Trigrams) do
-      if Profile.Trigrams[j] = TextTrigrams[i] then
-      begin
-        // Use stored frequency if available, otherwise fallback to positional weight
-        if j < Length(Profile.Freqs) then
-          freq := Profile.Freqs[j]
-        else
-          freq := MAX_POS_WEIGHT - j;   // first positions get higher weight
-        Break;
-      end;
-
-    if freq >= 0 then
-      Dec(score, freq)                  // negative contribution (better)
-    else
-      Inc(score, MISSING_PENALTY);     // positive contribution (worse)
-    Inc(tested);
-  end;
-
-  if tested = 0 then
-    Result := MISSING_PENALTY
-  else
-    Result := score / tested;           // average – lower (more negative) wins
-end;
-
 // Detects script, refines CJK classification, and returns script info.
 // No language-specific fast rules here – all of that is now in ApplyPostCorrection.
 function QuickScriptDetection(const AText: string; var Info: TScriptInfo; var Script: TScriptType; out Confidence: double): string;
@@ -385,30 +424,248 @@ begin
   end;
 end;
 
+//  Check if a UTF-8 character is in the CJK (Chinese/Japanese/Korean) range
+function IsCJK(const s: string): boolean;
+var
+  cp: UCS4Char;
+  CharLen: integer;
+begin
+  if s = '' then Exit(False);
+  CharLen := 0;
+  cp := UTF8CodepointToUnicode(@s[1], CharLen);
+  Result :=
+    // CJK Unified Ideographs (Chinese)
+    ((cp >= $4E00) and (cp <= $9FFF)) or ((cp >= $3400) and (cp <= $4DBF)) or ((cp >= $20000) and (cp <= $2A6DF)) or
+    // Hiragana & Katakana (Japanese)
+    ((cp >= $3040) and (cp <= $30FF)) or
+    // Hangul Syllables (Korean)
+    ((cp >= $AC00) and (cp <= $D7AF));
+end;
+
 // Returns the primary script associated with a language code.
 function GetScriptByLang(const Code: string): TScriptType;
 begin
   // Cyrillic
-  if (Code = 'be') or (Code = 'uk') or (Code = 'ru') or (Code = 'bg') or (Code = 'sr') or (Code = 'mk') or
-    (Code = 'kk') or (Code = 'ky') or (Code = 'mn') then
+  if (Code = 'ru') or (Code = 'uk') or (Code = 'be') or (Code = 'bg') or (Code = 'sr') or (Code = 'mk') or
+    (Code = 'kk') or (Code = 'ky') or (Code = 'mn') or (Code = 'tg') or (Code = 'tt') or (Code = 'ba') or
+    (Code = 'cv') or (Code = 'os') or (Code = 'sah') or (Code = 'xal') or (Code = 'ab') or (Code = 'ce') or
+    (Code = 'av') or (Code = 'udm') then
     Exit(stCyrillic);
+
   // Arabic
-  if (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or (Code = 'ug') then
+  if (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or (Code = 'ug') or
+    (Code = 'ckb') or (Code = 'prs') or (Code = 'ku') or (Code = 'azb') then
     Exit(stArabic);
+
   // CJK
-  if (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko') then
+  if (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko') or (Code = 'yue') then
     Exit(stCJK);
+
   // Greek
-  if (Code = 'el') then
-    Exit(stGreek);
+  if (Code = 'el') then Exit(stGreek);
+
   // Hebrew
-  if (Code = 'he') or (Code = 'iw') or (Code = 'yi') then
-    Exit(stHebrew);
+  if (Code = 'he') or (Code = 'iw') or (Code = 'yi') then Exit(stHebrew);
+
   // Devanagari
-  if (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') then
+  if (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') or (Code = 'mai') or (Code = 'new') or
+    (Code = 'awa') or (Code = 'bho') then
     Exit(stDevanagari);
-  // Everything else is assumed to use Latin script (or Other)
+
+  // Bengali (Assamese, Bengali)
+  if (Code = 'as') or (Code = 'bn') then Exit(stBengali);
+
+  // Gurmukhi (Punjabi)
+  if (Code = 'pa') then Exit(stGurmukhi);
+
+  // Gujarati
+  if (Code = 'gu') then Exit(stGujarati);
+
+  // Oriya
+  if (Code = 'or') then Exit(stOriya);
+
+  // Tamil
+  if (Code = 'ta') then Exit(stTamil);
+
+  // Telugu
+  if (Code = 'te') then Exit(stTelugu);
+
+  // Kannada
+  if (Code = 'kn') then Exit(stKannada);
+
+  // Malayalam
+  if (Code = 'ml') then Exit(stMalayalam);
+
+  // Sinhala
+  if (Code = 'si') then Exit(stSinhala);
+
+  // Thai
+  if (Code = 'th') then Exit(stThai);
+
+  // Lao
+  if (Code = 'lo') then Exit(stLao);
+
+  // Myanmar
+  if (Code = 'my') then Exit(stMyanmar);
+
+  // Khmer
+  if (Code = 'km') then Exit(stKhmer);
+
+  // Georgian
+  if (Code = 'ka') then Exit(stGeorgian);
+
+  // Armenian
+  if (Code = 'hy') then Exit(stArmenian);
+
+  // Ethiopic (Amharic, etc.)
+  if (Code = 'am') or (Code = 'ti') then Exit(stEthiopic);
+
+  // Tibetan
+  if (Code = 'bo') or (Code = 'dz') then Exit(stTibetan);
+
+  // Everything else is Latin script (covers all other world languages)
   Result := stLatin;
+end;
+
+// Checks if language code matches current script
+function IsLanguageMatchingScript(const Code: string; Script: TScriptType): boolean;
+begin
+  case Script of
+    stLatin:
+      // All languages EXCEPT those that normally use a non‑Latin script.
+      // This list covers all major non‑Latin languages and their script‑specific codes.
+      Result := not (
+        // Cyrillic (incl. many languages of Russia, Central Asia, etc.)
+        (Code = 'ru') or (Code = 'uk') or (Code = 'be') or (Code = 'bg') or (Code = 'sr') or (Code = 'mk') or
+        (Code = 'kk') or (Code = 'ky') or (Code = 'mn') or (Code = 'tg') or (Code = 'tt') or (Code = 'ba') or
+        (Code = 'cv') or (Code = 'os') or (Code = 'sah') or (Code = 'xal') or (Code = 'ab') or (Code = 'ce') or
+        (Code = 'av') or (Code = 'udm') or
+        // Arabic script
+        (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or (Code = 'ug') or
+        (Code = 'ckb') or (Code = 'prs') or (Code = 'ku') or (Code = 'azb') or
+        // Greek
+        (Code = 'el') or
+        // Hebrew
+        (Code = 'he') or (Code = 'iw') or (Code = 'yi') or
+        // CJK
+        (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko') or (Code = 'yue') or
+        // Devanagari & related
+        (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') or (Code = 'mai') or (Code = 'new') or
+        (Code = 'awa') or (Code = 'bho') or
+        // Bengali (includes Assamese)
+        (Code = 'bn') or (Code = 'as') or
+        // Gurmukhi (Punjabi)
+        (Code = 'pa') or
+        // Gujarati
+        (Code = 'gu') or
+        // Oriya
+        (Code = 'or') or
+        // Tamil
+        (Code = 'ta') or
+        // Telugu
+        (Code = 'te') or
+        // Kannada
+        (Code = 'kn') or
+        // Malayalam
+        (Code = 'ml') or
+        // Sinhala
+        (Code = 'si') or
+        // Thai
+        (Code = 'th') or
+        // Lao
+        (Code = 'lo') or
+        // Myanmar
+        (Code = 'my') or
+        // Khmer
+        (Code = 'km') or
+        // Georgian
+        (Code = 'ka') or
+        // Armenian
+        (Code = 'hy') or
+        // Ethiopic
+        (Code = 'am') or (Code = 'ti') or
+        // Tibetan
+        (Code = 'bo') or (Code = 'dz'));
+
+    // Cyrillic script
+    stCyrillic:
+      Result := (Code = 'ru') or (Code = 'uk') or (Code = 'be') or (Code = 'bg') or (Code = 'sr') or
+        (Code = 'mk') or (Code = 'kk') or (Code = 'ky') or (Code = 'mn') or (Code = 'tg') or (Code = 'tt') or
+        (Code = 'ba') or (Code = 'cv') or (Code = 'os') or (Code = 'sah') or (Code = 'xal') or (Code = 'ab') or
+        (Code = 'ce') or (Code = 'av') or (Code = 'udm');
+
+    // Arabic script
+    stArabic:
+      Result := (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or
+        (Code = 'ug') or (Code = 'ckb') or (Code = 'prs') or (Code = 'ku') or (Code = 'azb');
+
+    stGreek: Result := (Code = 'el');
+    stHebrew: Result := (Code = 'he') or (Code = 'iw') or (Code = 'yi');
+
+    // Devanagari (used by many North Indian languages)
+    stDevanagari:
+      Result := (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') or (Code = 'mai') or
+        (Code = 'new') or (Code = 'awa') or (Code = 'bho');
+
+    // CJK (Chinese, Japanese, Korean)
+    stCJK:
+      Result := (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko') or (Code = 'yue');
+
+    // Bengali script (used by Bengali and Assamese)
+    stBengali: Result := (Code = 'bn') or (Code = 'as');
+
+    // Gurmukhi (Punjabi)
+    stGurmukhi: Result := (Code = 'pa');
+
+    // Gujarati
+    stGujarati: Result := (Code = 'gu');
+
+    // Oriya
+    stOriya: Result := (Code = 'or');
+
+    // Tamil
+    stTamil: Result := (Code = 'ta');
+
+    // Telugu
+    stTelugu: Result := (Code = 'te');
+
+    // Kannada
+    stKannada: Result := (Code = 'kn');
+
+    // Malayalam
+    stMalayalam: Result := (Code = 'ml');
+
+    // Sinhala
+    stSinhala: Result := (Code = 'si');
+
+    // Thai
+    stThai: Result := (Code = 'th');
+
+    // Lao
+    stLao: Result := (Code = 'lo');
+
+    // Myanmar (Burmese)
+    stMyanmar: Result := (Code = 'my');
+
+    // Khmer
+    stKhmer: Result := (Code = 'km');
+
+    // Georgian
+    stGeorgian: Result := (Code = 'ka');
+
+    // Armenian
+    stArmenian: Result := (Code = 'hy');
+
+    // Ethiopic (Amharic, Tigrinya, etc.)
+    stEthiopic: Result := (Code = 'am') or (Code = 'ti');
+
+    // Tibetan
+    stTibetan: Result := (Code = 'bo') or (Code = 'dz');
+
+      // For any unknown script, we allow everything (should not normally happen)
+    else
+      Result := True;
+  end;
 end;
 
 // Returns a priority value for a language code.
@@ -556,8 +813,7 @@ var
   end;
 
 begin
-  // Norwegian vs Danish vs Swedish
-  // ------------------------------
+  {%Region -fold Norwegian vs Danish vs Swedish}
   if (Code = 'no') or (Code = 'da') or (Code = 'sv') then
   begin
     // Swedish unique letters
@@ -627,9 +883,9 @@ begin
       Exit;
     end;
   end;
+  {%EndRegion}
 
-  // Xhosa vs Zulu
-  // -------------
+  {%Region -fold Xhosa vs Zulu}
   if (Code = 'xh') or (Code = 'zu') then
   begin
     // Xhosa markers
@@ -648,12 +904,51 @@ begin
       Confidence := 1.0;
       Exit;
     end;
-    // If no marker found, reduce confidence
+  end;
+  {%EndRegion}
+
+  {%Region -fold Assamese vs Bengali (share Bengali script)}
+  if (Code = 'as') or (Code = 'bn') then
+  begin
+    // Assamese-only letters
+    if (Pos('ৰ', AText) > 0) or (Pos('ৱ', AText) > 0) then
+    begin
+      Code := 'as';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Bengali-only letter
+    if Pos('য়', AText) > 0 then
+    begin
+      Code := 'bn';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Frequent Assamese words
+    if (Pos('যিটো', AText) > 0) or (Pos('তেওঁ', AText) > 0) or (Pos('আৰু', AText) > 0) or
+      (Pos('এটা', AText) > 0) or (Pos('কৰি', AText) > 0) or (Pos('কৰা', AText) > 0) then
+    begin
+      Code := 'as';
+      Confidence := 0.95;
+      Exit;
+    end;
+
+    // Frequent Bengali words
+    if (Pos('যেটা', AText) > 0) or (Pos('এবং', AText) > 0) or (Pos('আমি', AText) > 0) or
+      (Pos('তিনি', AText) > 0) or (Pos('করতে', AText) > 0) or (Pos('করেছে', AText) > 0) then
+    begin
+      Code := 'bn';
+      Confidence := 0.95;
+      Exit;
+    end;
+
     Confidence := 0.45;
   end;
+  {%EndRegion}
 
-  // Bosnian / Croatian / Serbian (Latin script)
-  // -------------------------------------------
+  {%Region -fold Bosnian / Croatian / Serbian (Latin script)}
   if (Code = 'bs') or (Code = 'hr') or (Code = 'sr') then
   begin
     // Croatian characteristic words
@@ -674,9 +969,9 @@ begin
     // No markers found – decrease confidence to avoid false high certainty
     Confidence := 0.6;
   end;
+  {%EndRegion}
 
-  // Albanian vs Turkish
-  // -------------------
+  {%Region -fold Albanian vs Turkish}
   if (Code = 'sq') or (Code = 'tr') then
   begin
     // Albanian specific letter: ë (Turkish does not have)
@@ -696,9 +991,9 @@ begin
     // If neither special character is present, lower confidence
     Confidence := 0.7;
   end;
+  {%EndRegion}
 
-  // Sanskrit (Latin IAST) vs English
-  // ---------------------------------
+  {%Region -fold Sanskrit (Latin IAST) vs English}
   // Only boost confidence if diacritics present,
   // otherwise trust trigrams (they already work well for 80-char texts).
   if (Code = 'sa') and (Confidence < 1.0) then
@@ -712,9 +1007,9 @@ begin
     end;
     // No diacritics – leave trigram result unchanged.
   end;
+  {%EndRegion}
 
-  // Cyrillic group: be, uk, ru, bg, mk, sr
-  // ---------------------------------------
+  {%Region -fold Cyrillic group: be, uk, ru, bg, mk, sr}
   if (Code = 'be') or (Code = 'uk') or (Code = 'ru') or (Code = 'bg') or (Code = 'mk') or (Code = 'sr') then
   begin
     // Belarusian unique letter
@@ -812,9 +1107,9 @@ begin
     if (Code = 'mk') and (Pos('ѓ', AText) = 0) and (Pos('ќ', AText) = 0) and (Pos('ѕ', AText) = 0) then
       Confidence := 0.4;
   end;
+  {%EndRegion}
 
-  // Spanish vs Galician vs Portuguese
-  // ---------------------------------
+  {%Region -fold Spanish vs Galician vs Portuguese}
   if (Code = 'es') or (Code = 'gl') or (Code = 'pt') then
   begin
     if (Pos('ç', AText) > 0) or (Pos('ão', AText) > 0) or (Pos('ção', AText) > 0) or (Pos('ções', AText) > 0) then
@@ -837,9 +1132,9 @@ begin
       Exit;
     end;
   end;
+  {%EndRegion}
 
-  // Czech vs Slovak
-  // ---------------
+  {%Region -fold Czech vs Slovak}
   if (Code = 'cs') or (Code = 'sk') then
   begin
     if (Pos('ä', AText) > 0) or (Pos('ô', AText) > 0) or (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) then
@@ -855,9 +1150,9 @@ begin
       Exit;
     end;
   end;
+  {%EndRegion}
 
-  // Chinese Simplified vs Traditional
-  // ---------------------------------
+  {%Region -fold Chinese Simplified vs Traditional}
   if (Code = 'zh-CN') or (Code = 'zh-TW') then
   begin
     TwScore := 0;
@@ -908,9 +1203,9 @@ begin
       Exit;
     end;
   end;
+  {%EndRegion}
 
-  // Esperanto vs Khmer (Latin)
-  // --------------------------
+  {%Region -fold Esperanto vs Khmer (Latin)}
   if (Code = 'eo') or (Code = 'km') then
   begin
     // Esperanto unique letters
@@ -939,9 +1234,9 @@ begin
     if Code = 'km' then
       Confidence := 0.8;
   end;
+  {%EndRegion}
 
-  // Uzbek vs Guarani
-  // ----------------
+  {%Region -fold Uzbek vs Guarani}
   if (Code = 'uz') or (Code = 'gn') then
   begin
     // Guarani uses tilde letters
@@ -962,15 +1257,220 @@ begin
     // No special chars – lower confidence
     Confidence := 0.5;
   end;
+  {%EndRegion}
 
-  // Thai vs English
-  // ---------------
-  if (Code = 'en') and (Pos('ก', AText) > 0) then  // any Thai character (ก is common)
+  {%Region -fold Latin-script languages with unique letters vs English}
+  if Code = 'en' then
   begin
-    Code := 'th';
-    Confidence := 1.0;
-    Exit;
+    // Yoruba (yo) – subdots and tone marks
+    if (Pos('ẹ', AText) > 0) or (Pos('ọ', AText) > 0) or (Pos('ṣ', AText) > 0) or (Pos('Ẹ', AText) > 0) or
+      (Pos('Ọ', AText) > 0) or (Pos('Ṣ', AText) > 0) then
+    begin
+      Code := 'yo';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Igbo (ig) – diaeresis and subdots
+    if (Pos('ï', AText) > 0) or (Pos('ụ', AText) > 0) then
+    begin
+      Code := 'ig';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Hausa (ha) – hooked letters
+    if (Pos('ƙ', AText) > 0) or (Pos('ɗ', AText) > 0) then
+    begin
+      Code := 'ha';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Vietnamese (vi) – unique vowels
+    if (Pos('ơ', AText) > 0) or (Pos('ư', AText) > 0) or (Pos('ă', AText) > 0) then
+    begin
+      Code := 'vi';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Turkish (tr) – dotless i, dotted I, s-cedilla, soft g
+    if (Pos('ı', AText) > 0) or (Pos('İ', AText) > 0) or (Pos('ş', AText) > 0) or (Pos('ğ', AText) > 0) then
+    begin
+      Code := 'tr';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Polish (pl) – characteristic letters
+    if (Pos('ł', AText) > 0) or (Pos('ż', AText) > 0) or (Pos('ź', AText) > 0) then
+    begin
+      Code := 'pl';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Czech (cs) – ř, ů
+    if (Pos('ř', AText) > 0) or (Pos('ů', AText) > 0) then
+    begin
+      Code := 'cs';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Slovak (sk) – ŕ, ĺ
+    if (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) then
+    begin
+      Code := 'sk';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Latvian (lv) – macrons and cedillas
+    if (Pos('ā', AText) > 0) or (Pos('ē', AText) > 0) or (Pos('ī', AText) > 0) or (Pos('ū', AText) > 0) or
+      (Pos('ģ', AText) > 0) or (Pos('ķ', AText) > 0) or (Pos('ļ', AText) > 0) or (Pos('ņ', AText) > 0) then
+    begin
+      Code := 'lv';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Lithuanian (lt) – unique letters
+    if (Pos('į', AText) > 0) or (Pos('ų', AText) > 0) or (Pos('ė', AText) > 0) then
+    begin
+      Code := 'lt';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Esperanto (eo) – circumflexed letters
+    if (Pos('ĉ', AText) > 0) or (Pos('ĝ', AText) > 0) or (Pos('ĥ', AText) > 0) or (Pos('ĵ', AText) > 0) or
+      (Pos('ŝ', AText) > 0) or (Pos('ŭ', AText) > 0) then
+    begin
+      Code := 'eo';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // French (fr) – oe ligature (very rare in English)
+    if (Pos('œ', AText) > 0) or (Pos('Œ', AText) > 0) then
+    begin
+      Code := 'fr';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // German (de) – sharp s and umlauts
+    if (Pos('ß', AText) > 0) or (Pos('ä', AText) > 0) or (Pos('ö', AText) > 0) or (Pos('ü', AText) > 0) then
+    begin
+      Code := 'de';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Icelandic (is) – thorn and eth
+    if (Pos('þ', AText) > 0) or (Pos('ð', AText) > 0) then
+    begin
+      Code := 'is';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Hungarian (hu) – double acute
+    if (Pos('ő', AText) > 0) or (Pos('ű', AText) > 0) then
+    begin
+      Code := 'hu';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Romanian (ro) – comma-below letters
+    if (Pos('ș', AText) > 0) or (Pos('ț', AText) > 0) then
+    begin
+      Code := 'ro';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Spanish (es) – tilde n and inverted punctuation
+    if (Pos('ñ', AText) > 0) or (Pos('¿', AText) > 0) or (Pos('¡', AText) > 0) then
+    begin
+      Code := 'es';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Portuguese (pt) – tilde vowels and cedilla
+    if (Pos('ã', AText) > 0) or (Pos('õ', AText) > 0) or (Pos('ç', AText) > 0) then
+    begin
+      Code := 'pt';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Welsh (cy) – circumflex w and y
+    if (Pos('ŵ', AText) > 0) or (Pos('ŷ', AText) > 0) then
+    begin
+      Code := 'cy';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    if (Pos('ก', AText) > 0) then  // any Thai character (ก is common)
+    begin
+      Code := 'th';
+      Confidence := 1.0;
+      Exit;
+    end;
   end;
+  {%EndRegion}
+
+  {%Region -fold Hebrew script: Hebrew vs Yiddish}
+  // Hebrew (he/iw) vs Yiddish (yi) – both use the Hebrew script
+  if (Code = 'he') or (Code = 'iw') or (Code = 'yi') then
+  begin
+    // Yiddish unique ligatures: tsvey vovn (װ), vav yud (ױ), tsvey yudn (ײ)
+    if (Pos(#$05F0, AText) > 0) or (Pos(#$05F1, AText) > 0) or (Pos(#$05F2, AText) > 0) then
+    begin
+      Code := 'yi';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Apostrophe forms are extremely common in Yiddish
+    if (Pos('מ''', AText) > 0) or (Pos('ס''', AText) > 0) or (Pos('ר''', AText) > 0) or (Pos('כ''', AText) > 0) then
+    begin
+      Code := 'yi';
+      Confidence := 0.98;
+      Exit;
+    end;
+
+    // Frequent Yiddish words
+    if (Pos(' און ', AText) > 0) or (Pos(' איך ', AText) > 0) or (Pos(' נישט ', AText) > 0) or
+      (Pos(' דאס ', AText) > 0) or (Pos(' איז ', AText) > 0) or (Pos(' מיט ', AText) > 0) or
+      (Pos(' פון ', AText) > 0) or (Pos(' צו ', AText) > 0) or (Pos(' מען ', AText) > 0) or
+      (Pos(' זייער ', AText) > 0) or (Pos(' שוין ', AText) > 0) then
+    begin
+      Code := 'yi';
+      Confidence := 0.95;
+      Exit;
+    end;
+
+    // Common Yiddish endings
+    if (Pos('ונג', AText) > 0) or (Pos('קייט', AText) > 0) or (Pos('לעך', AText) > 0) then
+    begin
+      Code := 'yi';
+      Confidence := 0.90;
+      Exit;
+    end;
+
+    // If trigrams chose Yiddish but no strong indicator is present,
+    // reduce confidence because modern Hebrew is much more common.
+    if Code = 'yi' then
+      Confidence := 0.5;
+  end;
+  {%EndRegion}
 end;
 
 // Special correction for very short texts (< SHORT_TEXT_THRESHOLD chars)
@@ -1248,6 +1748,26 @@ begin
     Exit;
   end;
 
+  // Yiddish unique ligatures (tsvey vovn, vav yud, tsvey yudn)
+  if (Pos('װ', AText) > 0) or (Pos('ױ', AText) > 0) or (Pos('ײ', AText) > 0) or
+    // Common Yiddish letter combinations
+    (Pos('גע', AText) > 0) or (Pos('טש', AText) > 0) or (Pos('זש', AText) > 0) or (Pos('ניש', AText) > 0) or
+    (Pos('ונג', AText) > 0) or (Pos('ער ', AText) > 0) or (Pos('עס ', AText) > 0) then
+  begin
+    Code := 'yi';
+    Confidence := 1.0;
+    Exit;
+  end;
+
+  // Wolof (wo) – characteristic letters and particles
+  if (Pos('ñ', AText) > 0) or (Pos('Ñ', AText) > 0) or (Pos('ŋ', AText) > 0) or (Pos('Ŋ', AText) > 0) or
+    (Pos(' ci ', AText) > 0) or (Pos(' ngi ', AText) > 0) or (Pos(' ak ', AText) > 0) then
+  begin
+    Code := 'wo';
+    Confidence := 1.0;
+    Exit;
+  end;
+
   // Scandinavian fallback logic
   HasAeOe := (Pos('æ', AText) > 0) or (Pos('ø', AText) > 0) or (Pos('Æ', AText) > 0) or (Pos('Ø', AText) > 0);
   if HasAeOe then
@@ -1309,6 +1829,48 @@ begin
       Exit;
     end;
   end;
+end;
+
+// Frequency-aware distance (lower = better).
+// For each trigram of the text, if found in profile, adds a negative penalty
+// proportional to its frequency (or rank). Missing trigrams add a fixed positive penalty.
+function DistanceToProfile(const TextTrigrams: TStringArray; const Profile: TProfile): double;
+const
+  MISSING_PENALTY = 100;               // penalty for a trigram not found
+  MAX_POS_WEIGHT = 100;               // used when Freqs are not available
+var
+  i, j: integer;
+  score: integer;                      // total accumulated score (negative = good)
+  freq: integer;
+  tested: integer;
+begin
+  score := 0;
+  tested := 0;
+  for i := 0 to High(TextTrigrams) do
+  begin
+    freq := -1;                        // -1 means not found
+    for j := 0 to High(Profile.Trigrams) do
+      if Profile.Trigrams[j] = TextTrigrams[i] then
+      begin
+        // Use stored frequency if available, otherwise fallback to positional weight
+        if j < Length(Profile.Freqs) then
+          freq := Profile.Freqs[j]
+        else
+          freq := MAX_POS_WEIGHT - j;   // first positions get higher weight
+        Break;
+      end;
+
+    if freq >= 0 then
+      Dec(score, freq)                  // negative contribution (better)
+    else
+      Inc(score, MISSING_PENALTY);     // positive contribution (worse)
+    Inc(tested);
+  end;
+
+  if tested = 0 then
+    Result := MISSING_PENALTY
+  else
+    Result := score / tested;           // average – lower (more negative) wins
 end;
 
 // Uses the same tokenisation as BuildWordList in the generator.
@@ -1515,9 +2077,9 @@ end;
 function DetectLanguageWithConfidence(const AText: string; out Confidence: double): string;
 const
   SHORT_TEXT_THRESHOLD = 20;        // characters, below this trigrams are too noisy (disabled)
-  HIGH_TRIGRAM_CONFIDENCE = 0.9;    // If trigrams give such confidence, we trust them even in a short text
+  HIGH_TRIGRAM_CONFIDENCE = 0.7;    // If trigrams give such confidence, we trust them even in a short text
   WORD_CORRECTION_ALWAYS = 100;     // always try word correction for texts <= this length
-  LOW_TRIGRAM_CONFIDENCE = 0.7;     // trigram confidence below which to try words for longer texts
+  LOW_TRIGRAM_CONFIDENCE = 0.5;     // trigram confidence below which to try words for longer texts
   WORD_GAP_RATIO = 1.05;            // best word score must exceed second best by this factor
 var
   textTrigrams: TStringArray;
@@ -1706,7 +2268,7 @@ begin
   end;
 
   // 5. Word-based correction for short or low-confidence results
-  if (UTF8Length(AText) < WORD_CORRECTION_ALWAYS) or (Confidence < LOW_TRIGRAM_CONFIDENCE) then
+  if (UTF8Length(AText) < WORD_CORRECTION_ALWAYS) and (Confidence < LOW_TRIGRAM_CONFIDENCE) then
   begin
     maxWordScore := 0;
     secondWordScore := 0;
@@ -1749,6 +2311,10 @@ begin
   // 7. For very short texts, if trigram confidence is low, fall back to priority + special chars
   if (UTF8Length(AText) < SHORT_TEXT_THRESHOLD) and (Confidence < HIGH_TRIGRAM_CONFIDENCE) then
   begin
+    // If post‑correction already gave maximum confidence, keep the result.
+    if Confidence >= 1.0 then
+      Exit;
+
     // Reset to priority-based guess (same logic as before, but only as fallback)
     bestIdx := -1;
     bestPriority := High(word);
