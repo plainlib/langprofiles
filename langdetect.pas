@@ -528,6 +528,7 @@ var
 
 begin
   // Norwegian vs Danish vs Swedish
+  // ------------------------------
   if (Code = 'no') or (Code = 'da') or (Code = 'sv') then
   begin
     // Swedish unique letters
@@ -599,6 +600,7 @@ begin
   end;
 
   // Xhosa vs Zulu
+  // -------------
   if (Code = 'xh') or (Code = 'zu') then
   begin
     // Xhosa markers
@@ -622,6 +624,7 @@ begin
   end;
 
   // Bosnian / Croatian / Serbian (Latin script)
+  // -------------------------------------------
   if (Code = 'bs') or (Code = 'hr') or (Code = 'sr') then
   begin
     // Croatian characteristic words
@@ -644,6 +647,7 @@ begin
   end;
 
   // Albanian vs Turkish
+  // -------------------
   if (Code = 'sq') or (Code = 'tr') then
   begin
     // Albanian specific letter: ë (Turkish does not have)
@@ -664,7 +668,9 @@ begin
     Confidence := 0.7;
   end;
 
-  // Sanskrit (Latin IAST) vs English – only boost confidence if diacritics present,
+  // Sanskrit (Latin IAST) vs English
+  // ---------------------------------
+  // Only boost confidence if diacritics present,
   // otherwise trust trigrams (they already work well for 80-char texts).
   if (Code = 'sa') and (Confidence < 1.0) then
   begin
@@ -678,18 +684,19 @@ begin
     // No diacritics – leave trigram result unchanged.
   end;
 
-  // Indonesian vs Malay: removed block because trigrams perform well at 80 chars.
-  // (Keep this comment to document the intentional omission.)
-
-  // Belarusian / Ukrainian / Russian (Cyrillic group)
-  if (Code = 'be') or (Code = 'uk') or (Code = 'ru') then
+  // Cyrillic group: be, uk, ru, bg, mk, sr
+  // ---------------------------------------
+  if (Code = 'be') or (Code = 'uk') or (Code = 'ru') or (Code = 'bg') or (Code = 'mk') or (Code = 'sr') then
   begin
+    // Belarusian unique letter
     if (Pos('ў', AText) > 0) or (Pos('Ў', AText) > 0) then
     begin
       Code := 'be';
       Confidence := 1.0;
       Exit;
     end;
+
+    // Ukrainian unique letters
     if (Pos('ї', AText) > 0) or (Pos('є', AText) > 0) or (Pos('ґ', AText) > 0) or (Pos('Ї', AText) > 0) or
       (Pos('Є', AText) > 0) or (Pos('Ґ', AText) > 0) then
     begin
@@ -697,6 +704,52 @@ begin
       Confidence := 1.0;
       Exit;
     end;
+
+    // Macedonian unique letters (ѓ, ќ, ѕ)
+    if (Pos('ѓ', AText) > 0) or (Pos('ќ', AText) > 0) or (Pos('ѕ', AText) > 0) then
+    begin
+      Code := 'mk';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // Serbian unique letters (Cyrillic)
+    if (Pos('ђ', AText) > 0) or (Pos('ћ', AText) > 0) or (Pos('љ', AText) > 0) or (Pos('њ', AText) > 0) or
+      (Pos('џ', AText) > 0) or (Pos('Ђ', AText) > 0) or (Pos('Ћ', AText) > 0) or (Pos('Љ', AText) > 0) or
+      (Pos('Њ', AText) > 0) or (Pos('Џ', AText) > 0) then
+    begin
+      Code := 'sr';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // 'ј' is a definitive sign of Serbian/Macedonian, NOT ru/be/uk/bg
+    if (Pos('ј', AText) > 0) then
+    begin
+      // If the current guess is any of ru/be/uk/bg, switch to sr immediately
+      if (Code = 'ru') or (Code = 'be') or (Code = 'uk') or (Code = 'bg') then
+      begin
+        Code := 'sr';
+        Confidence := 1.0;   // 'ј' is a very strong signal
+        Exit;
+      end;
+      // If it's already sr or mk, boost confidence
+      if (Code = 'sr') or (Code = 'mk') then
+      begin
+        Confidence := 1.0;
+        Exit;
+      end;
+    end;
+
+    // Bulgarian strong marker: 'ъ' without Russian letters
+    if (Pos('ъ', AText) > 0) and (Pos('ы', AText) = 0) and (Pos('ё', AText) = 0) and (Pos('э', AText) = 0) then
+    begin
+      Code := 'bg';
+      Confidence := 1.0;
+      Exit;
+    end;
+
+    // 'і' belongs to Ukrainian or Belarusian only
     if (Pos('і', AText) > 0) or (Pos('І', AText) > 0) then
     begin
       if (Pos('ы', AText) > 0) or (Pos('Ы', AText) > 0) then
@@ -706,26 +759,33 @@ begin
       Confidence := 1.0;
       Exit;
     end;
-  end;
 
-  // Bulgarian vs Macedonian
-  if (Code = 'bg') or (Code = 'mk') then
-  begin
-    if (Pos('ъ', AText) > 0) and (Pos('ы', AText) = 0) and (Pos('ё', AText) = 0) and (Pos('э', AText) = 0) then
+    // Russian markers: 'ы', 'ё', 'э' – if present and no other specific letters, it's ru
+    if (Pos('ы', AText) > 0) or (Pos('ё', AText) > 0) or (Pos('э', AText) > 0) then
     begin
-      Code := 'bg';
-      Confidence := 1.0;
-      Exit;
-    end
-    else if (Pos('ѓ', AText) > 0) or (Pos('ќ', AText) > 0) then
-    begin
-      Code := 'mk';
-      Confidence := 1.0;
-      Exit;
+      // If we wrongly had sr or mk, switch to ru
+      if (Code = 'sr') or (Code = 'mk') then
+      begin
+        Code := 'ru';
+        Confidence := 1.0;
+        Exit;
+      end;
+      if Code = 'ru' then
+        Confidence := 1.0;
+      // Do NOT exit – just boost confidence; if it's ru, we keep it
     end;
+
+    // Lower confidence for sr and mk if no language-specific letters are present
+    if (Code = 'sr') and (Pos('ђ', AText) = 0) and (Pos('ћ', AText) = 0) and (Pos('љ', AText) = 0) and
+      (Pos('њ', AText) = 0) and (Pos('џ', AText) = 0) and (Pos('ј', AText) = 0) then
+      Confidence := 0.4;
+
+    if (Code = 'mk') and (Pos('ѓ', AText) = 0) and (Pos('ќ', AText) = 0) and (Pos('ѕ', AText) = 0) then
+      Confidence := 0.4;
   end;
 
   // Spanish vs Galician vs Portuguese
+  // ---------------------------------
   if (Code = 'es') or (Code = 'gl') or (Code = 'pt') then
   begin
     if (Pos('ç', AText) > 0) or (Pos('ão', AText) > 0) or (Pos('ção', AText) > 0) or (Pos('ções', AText) > 0) then
@@ -750,6 +810,7 @@ begin
   end;
 
   // Czech vs Slovak
+  // ---------------
   if (Code = 'cs') or (Code = 'sk') then
   begin
     if (Pos('ä', AText) > 0) or (Pos('ô', AText) > 0) or (Pos('ŕ', AText) > 0) or (Pos('ĺ', AText) > 0) then
@@ -767,6 +828,7 @@ begin
   end;
 
   // Chinese Simplified vs Traditional
+  // ---------------------------------
   if (Code = 'zh-CN') or (Code = 'zh-TW') then
   begin
     TwScore := 0;
@@ -818,7 +880,8 @@ begin
     end;
   end;
 
-  // Esperanto vs Khmer (Latin) – added based on 300-char test
+  // Esperanto vs Khmer (Latin)
+  // --------------------------
   if (Code = 'eo') or (Code = 'km') then
   begin
     // Esperanto unique letters
@@ -848,7 +911,8 @@ begin
       Confidence := 0.8;
   end;
 
-  // Uzbek vs Guarani – added based on 300-char test
+  // Uzbek vs Guarani
+  // ----------------
   if (Code = 'uz') or (Code = 'gn') then
   begin
     // Guarani uses tilde letters
@@ -870,7 +934,8 @@ begin
     Confidence := 0.5;
   end;
 
-  // Thai vs English – only intervene if trigrams chose English but Thai chars present
+  // Thai vs English
+  // ---------------
   if (Code = 'en') and (Pos('ก', AText) > 0) then  // any Thai character (ก is common)
   begin
     Code := 'th';
