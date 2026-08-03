@@ -23,6 +23,13 @@ procedure WaitForEsc;
 // Iter:   number of samples per file (sliding window if file longer than MaxLen).
 procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Iter: integer);
 
+// Write a message to both console and a log file.
+// LogFileName defaults to 'langprofiles_test.log' in the application folder.
+procedure LogToFile(const Msg: string; const LogFileName: string = 'langprofiles.log');
+
+// Print information about currently loaded language profiles.
+procedure ShowLoadedProfilesInfo;
+
 implementation
 
 uses
@@ -30,6 +37,7 @@ uses
   Windows,
   {$ENDIF}
   SysUtils,
+  StrUtils,
   Classes,
   LazUTF8,
   Math,
@@ -38,6 +46,44 @@ uses
 
 const
   BOM_UTF8 = #239#187#191;
+
+procedure LogToFile(const Msg: string; const LogFileName: string = 'langprofiles.log');
+var
+  LogPath: string;
+  LogFile: TextFile;
+begin
+  WriteLn(Msg);
+  LogPath := ExtractFilePath(ParamStr(0)) + LogFileName;
+  AssignFile(LogFile, LogPath);
+  if FileExists(LogPath) then
+    Append(LogFile)
+  else
+    Rewrite(LogFile);
+  WriteLn(LogFile, Msg);
+  CloseFile(LogFile);
+end;
+
+procedure ShowLoadedProfilesInfo;
+var
+  ProfIdx: integer;
+  TrigCnt, WordCnt: integer;
+  Msg: string;
+begin
+  LogToFile('Profile info (loaded from langprofiles.dat or built-in):');
+  LogToFile(Format('Total languages: %d', [Length(Profiles)]));
+  for ProfIdx := 0 to High(Profiles) do
+  begin
+    TrigCnt := Length(Profiles[ProfIdx].Trigrams);
+    WordCnt := Length(Profiles[ProfIdx].Wrds);
+    Msg := Format('  %-6s  trigrams: %5d', [Profiles[ProfIdx].Code, TrigCnt]);
+    if WordCnt > 0 then
+      Msg := Msg + Format('  words: %5d', [WordCnt])
+    else
+      Msg := Msg + '  words:     -';
+    Msg := Msg + Format('  priority: %d', [Profiles[ProfIdx].Priority]);
+    LogToFile(Msg);
+  end;
+end;
 
 procedure WaitForEsc;
 {$IFDEF WINDOWS}
@@ -50,7 +96,7 @@ var
 begin
   Rec := Default(TInputRecord);
 
-  WriteLn('Press ESC to quit...');
+  LogToFile('Press ESC to quit...');
   {$IFDEF WINDOWS}
   hIn := GetStdHandle(STD_INPUT_HANDLE);
 
@@ -88,18 +134,17 @@ var
   Percent: double;
   ResultsLine: string;
   StartTime, EndTime: TDateTime;
+  Msg: string;
 begin
   if not DirectoryExists(CorpusDir) then
   begin
-    WriteLn('Directory not found: ', CorpusDir);
+    LogToFile('Directory not found: ' + CorpusDir);
     Exit;
   end;
 
-  WriteLn('Scanning: ', CorpusDir);
-  WriteLn('Max sample length: ', MaxLen);
-  if Iter > 1 then
-    WriteLn('Samples per file: ', Iter);
-  WriteLn('----------------------------------------');
+  LogToFile('Scanning: ' + CorpusDir);
+  LogToFile('Max sample length: ' + IntToStr(MaxLen) + ifthen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
+  LogToFile('----------------------------------------');
 
   StartTime := Now;
 
@@ -119,7 +164,7 @@ begin
         Free;
       end;
     except
-      WriteLn(SR.Name, ' -> [read error]');
+      LogToFile(SR.Name + ' -> [read error]');
       Continue;
     end;
 
@@ -140,8 +185,9 @@ begin
         ResultsLine := DetectedCode;
         if DetectedCode = FileNameNoExt then
           Inc(FileOK);
-        WriteLn(Format('%s -> %s (%.2f) %s', [SR.Name, DetectedCode, Confidence, BoolToStr(DetectedCode =
-          FileNameNoExt, 'OK', 'FAIL expected ' + FileNameNoExt)]));
+        Msg := Format('%s -> %s (%.2f) %s', [SR.Name, DetectedCode, Confidence, BoolToStr(DetectedCode =
+          FileNameNoExt, 'OK', 'FAIL expected ' + FileNameNoExt)]);
+        LogToFile(Msg);
         Inc(TotalTests);
         Inc(CorrectTests, FileOK);
       end
@@ -172,12 +218,13 @@ begin
           end;
         end;
 
-        Write(Format('%s -> %d/%d', [SR.Name, FileOK, FileTotal]));
+        Msg := Format('%s -> %d/%d', [SR.Name, FileOK, FileTotal]);
         if FileOK = FileTotal then
-          Write(' OK (all correct)')
+          Msg := Msg + ' OK (all correct)'
         else
-          Write(Format(' FAIL expected %s', [FileNameNoExt]));
-        WriteLn(' [' + ResultsLine + ']');
+          Msg := Msg + Format(' FAIL expected %s', [FileNameNoExt]);
+        Msg := Msg + ' [' + ResultsLine + ']';
+        LogToFile(Msg);
 
         Inc(TotalTests, FileTotal);
         Inc(CorrectTests, FileOK);
@@ -194,14 +241,12 @@ begin
   else
     Percent := 0;
 
-  WriteLn('----------------------------------------');
-  WriteLn('Max sample length: ', MaxLen);
-  if Iter > 1 then
-    WriteLn('Samples per file: ', Iter);
-  WriteLn('----------------------------------------');
-  WriteLn(Format('Processed: %d tests over %d files, Correct: %d (%.1f%%)', [TotalTests, TotalTests div Iter, CorrectTests, Percent]));
-  WriteLn(Format('Test completed in %d ms.', [MilliSecondsBetween(EndTime, StartTime)]));
-  WaitForEsc;
+  LogToFile('----------------------------------------');
+  LogToFile('Max sample length: ' + IntToStr(MaxLen) + ifthen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
+  Msg := Format('Processed: %d tests over %d files, Correct: %d (%.1f%%)', [TotalTests, TotalTests div Iter, CorrectTests, Percent]);
+  LogToFile(Msg);
+  Msg := Format('Test completed in %d ms.', [MilliSecondsBetween(EndTime, StartTime)]);
+  LogToFile(Msg);
 end;
 
 end.

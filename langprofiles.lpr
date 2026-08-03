@@ -296,10 +296,20 @@ begin
   MinWordLen := DEF_MIN_WORD_LEN;
   DedupThreshold := DEF_DEDUP_THRESHOLD;
 
+  // Check for -i / -info before anything else
+  for i := 1 to ParamCount do
+    if SameText(ParamStr(i), '-i') or SameText(ParamStr(i), '-info') then
+    begin
+      langtest.ShowLoadedProfilesInfo;
+      WaitForEsc;
+      Halt;
+    end;
+
   // Parse command line
   if ParamCount = 0 then
   begin
     RunLanguageDetectionTest('.\corpus', TestMaxLen, TestIter);
+    WaitForEsc;
     Halt;
   end;
 
@@ -368,7 +378,7 @@ begin
         if UTF8Length(Text) >= MIN_TEXT_LENGTH then
           validFiles.Add(langCode)
         else
-          Writeln('Skipping ', langCode, ' (corpus too short)');
+          LogToFile('Skipping ' + langCode + ' (corpus too short)');
         Free;
       end;
     until FindNext(sr) <> 0;
@@ -376,7 +386,7 @@ begin
   end;
   if validFiles.Count = 0 then
   begin
-    Writeln('No valid corpora found.');
+    LogToFile('No valid corpora found.');
     Halt(1);
   end;
   totalLangs := validFiles.Count;
@@ -396,7 +406,7 @@ begin
     for i := 0 to totalLangs - 1 do
     begin
       langCode := validFiles[i];
-      Write(Format('  [%d/%d] %s ...', [i + 1, totalLangs, langCode]));
+      LogToFile(Format('  [%d/%d] %s ...', [i + 1, totalLangs, langCode]));
       fullPath := corpusDir + langCode + '.txt';
 
       with TStringList.Create do
@@ -432,9 +442,9 @@ begin
         end;
         Writeln(txtOut, langCode, ' =');
         if NumWords > 0 then
-          Writeln(' 0 trigrams, 0 words')
+          LogToFile(' 0 trigrams, 0 words')
         else
-          Writeln(' 0 trigrams');
+          LogToFile(' 0 trigrams');
         Continue;
       end;
 
@@ -510,9 +520,9 @@ begin
         Write(txtOut, ' "', weights[j].Trig, '"');
       Writeln(txtOut);
       if NumWords > 0 then
-        Writeln(Format(' %d trigrams, 0 words (pre-dedup)', [trigCount]))
+        LogToFile(Format(' %d trigrams, 0 words (pre-dedup)', [trigCount]))
       else
-        Writeln(Format(' %d trigrams', [trigCount]));
+        LogToFile(Format(' %d trigrams', [trigCount]));
     end;
 
     // --- Phase 2: deduplicate words with threshold and rebuild file ---
@@ -520,8 +530,8 @@ begin
     begin
       CommonWords := FindCommonWordsWithThreshold(AllWordLists, DedupThreshold);
       try
-        WriteLn(Format('Dedup: removed %d words appearing in >= %d languages.', [CommonWords.Count, DedupThreshold]));
-        WriteLn('Rebuilding final file...');
+        LogToFile(Format('Dedup: removed %d words appearing in >= %d languages.', [CommonWords.Count, DedupThreshold]));
+        LogToFile('Rebuilding final file...');
 
         SetLength(FinalWords, totalLangs);
         SetLength(FinalWeights, totalLangs);
@@ -573,7 +583,7 @@ begin
           for i := 0 to totalLangs - 1 do
           begin
             langCode := validFiles[i];
-            Write(Format('  [%d/%d] %s ...', [i + 1, totalLangs, langCode]));
+            LogToFile(Format('  [%d/%d] %s ...', [i + 1, totalLangs, langCode]));
             fullPath := corpusDir + langCode + '.txt';
 
             with TStringList.Create do
@@ -614,7 +624,7 @@ begin
               finally
                 plainStream.Free;
               end;
-              WriteLn(Format(' 0 trigrams, %d words', [wordCount]));
+              LogToFile(Format(' 0 trigrams, %d words', [wordCount]));
               Writeln(txtOut, langCode, ' =');
               if wordCount > 0 then
               begin
@@ -692,7 +702,7 @@ begin
               plainStream.Free;
             end;
 
-            WriteLn(Format(' %d trigrams, %d words', [trigCount, wordCount]));
+            LogToFile(Format(' %d trigrams, %d words', [trigCount, wordCount]));
             Write(txtOut, langCode, ' =');
             for j := 0 to trigCount - 1 do
               Write(txtOut, ' "', weights[j].Trig, '"');
@@ -718,9 +728,9 @@ begin
       CloseFile(txtOut);
     end;
 
-    Writeln('Done. Profiles saved to ', outFile);
-    Writeln('Text dump saved to ', txtFilePath);
-    WriteLn('Press any key to exit (ESC to quit)...');
+    LogToFile('Done. Profiles saved to ' + outFile);
+    LogToFile('Text dump saved to ' + txtFilePath);
+    LogToFile('Press any key to exit (ESC to quit)...');
     WaitForEsc;
   finally
     // txtOut already closed in Phase2 or above; but to be safe, if an exception occurs we close it
