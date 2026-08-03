@@ -128,6 +128,9 @@ function DetectLanguageForText(const AText: string): string;
 // Also returns a confidence value between 0.0 and 1.0
 function DetectLanguageWithConfidence(const AText: string; out Confidence: double): string;
 
+// Public wrapper for file-based loading
+procedure MergeProfilesFromFile(const FileName: string);
+
 implementation
 
 {%Region -fold Private Methods}
@@ -2358,8 +2361,8 @@ end;
 // Internal routine that does the actual merge from any TStream
 procedure MergeProfilesFromStream(AStream: TStream);
 const
-  MAX_TRIGRAMS = 2000;
-  MAX_WORDS = 2000;            // safety limit
+  MAX_TRIGRAMS = 100000;
+  MAX_WORDS = 100000;            // safety limit
   MAGIC_COMPRESSED: cardinal = $4F525047; // 'GPRO' in little-endian
 var
   magic: cardinal;

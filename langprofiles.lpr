@@ -288,6 +288,7 @@ var
   CommonWords: TStringList;
   DedupedList: TWordFreqArray = nil;
   wIdx: integer;
+  ProfileFile: string = '';
 begin
   TestMaxLen := DEF_TEST_MAXLEN;
   TestIter := DEF_TEST_ITER;
@@ -296,6 +297,7 @@ begin
   MinWordLen := DEF_MIN_WORD_LEN;
   DedupThreshold := DEF_DEDUP_THRESHOLD;
 
+  // Parse command line
   // Check for -i / -info before anything else
   for i := 1 to ParamCount do
     if SameText(ParamStr(i), '-i') or SameText(ParamStr(i), '-info') then
@@ -305,16 +307,10 @@ begin
       Halt;
     end;
 
-  // Parse command line
-  if ParamCount = 0 then
+  // Branch: generation mode or test mode
+  if (ParamCount >= 1) and SameText(ParamStr(1), 'gen') then
   begin
-    RunLanguageDetectionTest('.\corpus', TestMaxLen, TestIter);
-    WaitForEsc;
-    Halt;
-  end;
-
-  if SameText(ParamStr(1), 'gen') then
-  begin
+    // Generation mode
     corpusDir := '.\corpus';
     outFile := '.\langprofiles.dat';
     i := 2;
@@ -354,15 +350,33 @@ begin
   end
   else
   begin
-    if ParamCount >= 1 then
-      TestMaxLen := StrToIntDef(ParamStr(1), TestMaxLen);
-    if ParamCount >= 2 then
-      TestIter := StrToIntDef(ParamStr(2), TestIter);
+    // Test mode (including no parameters)
+    ProfileFile := '';
+    TestMaxLen := DEF_TEST_MAXLEN;
+    TestIter := DEF_TEST_ITER;
+    i := 1;
+    while i <= ParamCount do
+    begin
+      if (ParamStr(i) = '-pf') and (i + 1 <= ParamCount) then
+      begin
+        ProfileFile := ParamStr(i + 1);
+        Inc(i, 2);
+        Continue;
+      end;
+      // First non-option numeric value is MaxLen, second is Iter
+      if TestMaxLen = DEF_TEST_MAXLEN then
+        TestMaxLen := StrToIntDef(ParamStr(i), TestMaxLen)
+      else if TestIter = DEF_TEST_ITER then
+        TestIter := StrToIntDef(ParamStr(i), TestIter);
+      Inc(i);
+    end;
     if TestIter < 1 then TestIter := 1;
-    RunLanguageDetectionTest('.\corpus', TestMaxLen, TestIter);
+    RunLanguageDetectionTest('.\corpus', TestMaxLen, TestIter, ProfileFile);
+    WaitForEsc;
     Halt;
   end;
 
+  // Below only reached in "gen" mode
   corpusDir := IncludeTrailingPathDelimiter(corpusDir);
   txtFilePath := ChangeFileExt(outFile, '.txt');
 
@@ -391,7 +405,7 @@ begin
   end;
   totalLangs := validFiles.Count;
 
-  // --- Phase 1: collect trigrams and word frequencies ---
+  // Phase 1: collect trigrams and word frequencies
   SetLength(AllWordLists, totalLangs);
   for i := 0 to totalLangs - 1 do
     SetLength(AllWordLists[i], 0);
@@ -525,7 +539,7 @@ begin
         LogToFile(Format(' %d trigrams', [trigCount]));
     end;
 
-    // --- Phase 2: deduplicate words with threshold and rebuild file ---
+    // Phase 2: deduplicate words with threshold and rebuild file
     if NumWords > 0 then
     begin
       CommonWords := FindCommonWordsWithThreshold(AllWordLists, DedupThreshold);
@@ -734,7 +748,6 @@ begin
     WaitForEsc;
   finally
     // txtOut already closed in Phase2 or above; but to be safe, if an exception occurs we close it
-    // We use a try/finally, but we may have already closed it. We'll just ignore error on double close
     try
       CloseFile(txtOut);
     except

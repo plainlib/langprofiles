@@ -21,10 +21,11 @@ procedure WaitForEsc;
 // Run language detection test on corpus files in the given directory.
 // MaxLen: maximum number of characters taken from each file (starting at 1).
 // Iter:   number of samples per file (sliding window if file longer than MaxLen).
-procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Iter: integer);
+// ProfileFile: if not empty, additional profile file is loaded before testing.
+procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Iter: integer; const ProfileFile: string = '');
 
 // Write a message to both console and a log file.
-// LogFileName defaults to 'langprofiles_test.log' in the application folder.
+// LogFileName defaults to 'langprofiles.log' in the application folder.
 procedure LogToFile(const Msg: string; const LogFileName: string = 'langprofiles.log');
 
 // Print information about currently loaded language profiles.
@@ -116,7 +117,7 @@ begin
   {$ENDIF}
 end;
 
-procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Iter: integer);
+procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Iter: integer; const ProfileFile: string = '');
 var
   SR: TSearchRec;
   FullPath: string;
@@ -142,8 +143,20 @@ begin
     Exit;
   end;
 
+  // Load additional profiles if specified
+  if ProfileFile <> '' then
+  begin
+    if FileExists(ProfileFile) then
+    begin
+      MergeProfilesFromFile(ProfileFile);
+      LogToFile('Additional profiles loaded from: ' + ProfileFile);
+    end
+    else
+      LogToFile('Warning: profile file not found: ' + ProfileFile);
+  end;
+
   LogToFile('Scanning: ' + CorpusDir);
-  LogToFile('Max sample length: ' + IntToStr(MaxLen) + ifthen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
+  LogToFile('Max sample length: ' + IntToStr(MaxLen) + IfThen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
   LogToFile('----------------------------------------');
 
   StartTime := Now;
@@ -242,7 +255,7 @@ begin
     Percent := 0;
 
   LogToFile('----------------------------------------');
-  LogToFile('Max sample length: ' + IntToStr(MaxLen) + ifthen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
+  LogToFile('Max sample length: ' + IntToStr(MaxLen) + IfThen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
   Msg := Format('Processed: %d tests over %d files, Correct: %d (%.1f%%)', [TotalTests, TotalTests div Iter, CorrectTests, Percent]);
   LogToFile(Msg);
   Msg := Format('Test completed in %d ms.', [MilliSecondsBetween(EndTime, StartTime)]);
