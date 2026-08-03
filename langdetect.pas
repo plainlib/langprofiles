@@ -86,8 +86,11 @@ const
 //  For texts dominated by CJK characters, spaces are ignored.
 function ExtractCharTrigrams(const AText: string): TStringArray;
 
-// If the text is shorter than 10 characters and the confidence is less than the threshold, we consider it unknown.
-function DetectLanguageSafe(const AText: string; MinConfidence: double = 0.5): string;
+// Safe language detection with optional current language hint.
+// If a current language is provided and confidence is below MinConfidence
+// but above 0.30, the result will still be accepted if the script of the
+// detected language differs from the script of the current language.
+function DetectLanguageSafe(const AText: string; ACurrentLang: string = ''; MinConfidence: double = 0.5): string;
 
 // Returns language code (e.g. 'en', 'ru') or UNKNOWN
 function DetectLanguageForText(const AText: string): string;
@@ -380,6 +383,32 @@ begin
       Info.Katakana := 0;
     end;
   end;
+end;
+
+// Returns the primary script associated with a language code.
+function GetScriptByLang(const Code: string): TScriptType;
+begin
+  // Cyrillic
+  if (Code = 'be') or (Code = 'uk') or (Code = 'ru') or (Code = 'bg') or (Code = 'sr') or (Code = 'mk') or
+    (Code = 'kk') or (Code = 'ky') or (Code = 'mn') then
+    Exit(stCyrillic);
+  // Arabic
+  if (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or (Code = 'ug') then
+    Exit(stArabic);
+  // CJK
+  if (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko') then
+    Exit(stCJK);
+  // Greek
+  if (Code = 'el') then
+    Exit(stGreek);
+  // Hebrew
+  if (Code = 'he') or (Code = 'iw') or (Code = 'yi') then
+    Exit(stHebrew);
+  // Devanagari
+  if (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') then
+    Exit(stDevanagari);
+  // Everything else is assumed to use Latin script (or Other)
+  Result := stLatin;
 end;
 
 // Returns a priority value for a language code.
@@ -1449,13 +1478,31 @@ begin
     Result[i] := chars[i] + chars[i + 1] + chars[i + 2];
 end;
 
-function DetectLanguageSafe(const AText: string; MinConfidence: double): string;
+function DetectLanguageSafe(const AText: string; ACurrentLang: string = ''; MinConfidence: double = 0.5): string;
+const
+  MIN_SCRIPT_CHANGE_CONFIDENCE = 0.25;   // lower threshold when script differs
 var
   conf: double;
+  detectedScript, currentScript: TScriptType;
 begin
   Result := DetectLanguageWithConfidence(AText, conf);
-  if conf < MinConfidence then
-    Result := UNKNOWN;
+
+  // If confidence is high enough, always accept
+  if conf >= MinConfidence then
+    Exit;
+
+  // If a current language is given and confidence is not too low,
+  // check whether the script changed
+  if (ACurrentLang <> '') and (conf >= MIN_SCRIPT_CHANGE_CONFIDENCE) then
+  begin
+    detectedScript := GetScriptByLang(Result);
+    currentScript := GetScriptByLang(ACurrentLang);
+    if detectedScript <> currentScript then
+      Exit;   // accept the detected language despite low confidence
+  end;
+
+  // Otherwise, reject
+  Result := UNKNOWN;
 end;
 
 function DetectLanguageForText(const AText: string): string;
