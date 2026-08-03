@@ -73,15 +73,22 @@ context).
 ### 2. Profile info
 
 ```bash
-langprofiles -i
-langprofiles -info
+langprofiles -i                       # display currently loaded profiles
+langprofiles -info                    # same as -i
+langprofiles -i -pf <file>            # load extra profile file and display combined info
+langprofiles -info -pf <file>         # equivalent
 ```
 
-Prints to console (and log) a summary of all currently loaded language profiles:
+Prints to console (and log) a summary of all language profiles available for detection.
+If a profile file is specified with `-pf <file>`, it is loaded (merged on top of the
+default built‑in and `langprofiles.dat` profiles) before the summary is shown.
+
+The output includes:
 - total number of languages,
 - for each language: code, number of trigrams, number of stored words (if any), priority.
 
-Useful to quickly check what data is available for detection.
+Useful to quickly check what data is available for detection, and to verify that a
+custom profile file contains the expected languages and counts.
 
 ### 3. Generation mode
 
@@ -121,9 +128,7 @@ langprofiles gen ./corpora ./out.bin -n 800 -w 500 -wl 3 -d 2
 
 ## Logging
 
-All messages printed to the console are automatically mirrored to a log file:
-- In test mode and profile info: `langprofiles_test.log` (by default).
-- In generation mode: `langprofiles.log`.
+All messages printed to the console are automatically mirrored to a log file: `langprofiles.log`
 
 The log file is created in the same folder as the executable. This provides a permanent record
 of every run and is especially useful for long generation sessions or automated testing.

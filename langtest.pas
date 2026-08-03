@@ -29,7 +29,7 @@ procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Ite
 procedure LogToFile(const Msg: string; const LogFileName: string = 'langprofiles.log');
 
 // Print information about currently loaded language profiles.
-procedure ShowLoadedProfilesInfo;
+procedure ShowLoadedProfilesInfo(const ProfileFile: string = '');
 
 implementation
 
@@ -64,12 +64,24 @@ begin
   CloseFile(LogFile);
 end;
 
-procedure ShowLoadedProfilesInfo;
+procedure ShowLoadedProfilesInfo(const ProfileFile: string = '');
 var
   ProfIdx: integer;
   TrigCnt, WordCnt: integer;
   Msg: string;
 begin
+  // Load additional profiles if requested
+  if ProfileFile <> '' then
+  begin
+    if FileExists(ProfileFile) then
+    begin
+      MergeProfilesFromFile(ProfileFile);
+      LogToFile('Additional profiles loaded from: ' + ProfileFile);
+    end
+    else
+      LogToFile('Warning: profile file not found: ' + ProfileFile);
+  end;
+
   LogToFile('Profile info (loaded from langprofiles.dat or built-in):');
   LogToFile(Format('Total languages: %d', [Length(Profiles)]));
   for ProfIdx := 0 to High(Profiles) do

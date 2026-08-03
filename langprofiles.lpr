@@ -302,7 +302,15 @@ begin
   for i := 1 to ParamCount do
     if SameText(ParamStr(i), '-i') or SameText(ParamStr(i), '-info') then
     begin
-      langtest.ShowLoadedProfilesInfo;
+      ProfileFile := '';
+      // Look for -pf argument among the rest
+      for j := i + 1 to ParamCount do
+        if (ParamStr(j) = '-pf') and (j + 1 <= ParamCount) then
+        begin
+          ProfileFile := ParamStr(j + 1);
+          Break;
+        end;
+      langtest.ShowLoadedProfilesInfo(ProfileFile);
       WaitForEsc;
       Halt;
     end;
