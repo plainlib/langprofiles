@@ -803,7 +803,9 @@ end;
 // Optimized: fixed HasWord boundaries bug and reduced repetitive blocks via array helpers.
 procedure ApplyPostCorrection(var Code: string; var Confidence: double; const AText: string);
 var
-  KuScore, TwScore, CnScore: integer;
+  TwScore, CnScore: integer;
+  hrScore, bsScore, srScore: integer;
+  tnMarkers, nsMarkers: integer;
 
 // Checks if a word exists with boundaries, correctly handling multiple occurrences
   function HasWord(const word: string): boolean; overload;
@@ -934,28 +936,31 @@ begin
   {%Region -fold Xhosa vs Zulu}
   if (Code = 'xh') or (Code = 'zu') then
   begin
-    if HasWord(['xh', 'kwaye', 'umntu', 'ngoku', 'kwa', 'xa', 'ndi']) then
+    if CountWords(['ukuba', 'umntu', 'isixhosa', 'kwaye', 'ngoku', 'kwa', 'xa', 'ndi']) >
+      CountWords(['ukuthi', 'umuntu', 'isizulu', 'kanti', 'yena', 'lapha', 'yini', 'lona']) + 1 then
     begin
       Code := 'xh';
-      Confidence := 1.0;
+      Confidence := 0.95;
       Exit;
     end;
-    if HasWord(['zu', 'ngi', 'uku', 'kanti', 'yena', 'lapha', 'yini', 'nini', 'lona']) then
+    if CountWords(['ukuthi', 'umuntu', 'isizulu', 'kanti', 'yena', 'lapha', 'yini', 'lona']) >
+      CountWords(['ukuba', 'umntu', 'isixhosa', 'kwaye', 'ngoku', 'kwa', 'xa', 'ndi']) + 1 then
     begin
       Code := 'zu';
-      Confidence := 1.0;
+      Confidence := 0.95;
       Exit;
     end;
+    // No clear winner – keep original code with reduced confidence
+    Confidence := 0.55;
   end;
   {%EndRegion}
 
   {%Region -fold Kurdish vs Turkish, Hausa and others}
   if (Code = 'ku') or (Code = 'tr') or (Code = 'ha') or (Code = 'id') then
   begin
-    KuScore := CountChars(['ê', 'î', 'û', 'Ê', 'Î', 'Û', 'ev', 'ew', 'xw']) +
-      CountWords(['xwe', 'heye', 'gelek', 'kirin', 'çawa', 'çend', 'hinek', 'rojbaş', 'baş']);
-
-    if KuScore >= 2 then
+    // Kurdish must have at least one special letter + several typical words
+    if HasChar(['ê', 'î', 'û', 'Ê', 'Î', 'Û']) and
+      (CountWords(['xwe', 'heye', 'kirin', 'çawa', 'gelek', 'çend', 'hinek', 'rojbaş', 'baş']) >= 2) then
     begin
       Code := 'ku';
       Confidence := 1.0;
@@ -967,20 +972,20 @@ begin
       Confidence := 1.0;
       Exit;
     end;
-
-    if Code = 'ku' then Confidence := 0.5;
   end;
   {%EndRegion}
 
   {%Region -fold Assamese vs Bengali}
   if (Code = 'as') or (Code = 'bn') then
   begin
+    // Unique Assamese letter
     if HasChar(['ৰ', 'ৱ']) then
     begin
       Code := 'as';
       Confidence := 1.0;
       Exit;
     end;
+    // Unique Bengali letter
     if HasChar(['য়']) then
     begin
       Code := 'bn';
@@ -988,15 +993,18 @@ begin
       Exit;
     end;
 
-    if HasChar(['যিটো', 'তেওঁ', 'আৰু', 'এটা', 'কৰি', 'কৰা']) then
+    // Strong Bengali phrases (first)
+    if HasWord(['এবং', 'আমি', 'তিনি', 'করতে', 'করেছে', 'যেটা',
+      'দিয়ে', 'থেকে', 'বাংলা']) then
     begin
-      Code := 'as';
+      Code := 'bn';
       Confidence := 0.95;
       Exit;
     end;
-    if HasChar(['যেটা', 'এবং', 'আমি', 'তিনি', 'করতে', 'করেছে']) then
+    // Strong Assamese phrases (only if Bengali not matched)
+    if HasWord(['আৰু', 'তেওঁ', 'এটা', 'কৰি', 'কৰা', 'যিটো', 'অসমীয়া']) then
     begin
-      Code := 'bn';
+      Code := 'as';
       Confidence := 0.95;
       Exit;
     end;
@@ -1008,18 +1016,58 @@ begin
   {%Region -fold Bosnian / Croatian / Serbian}
   if (Code = 'bs') or (Code = 'hr') or (Code = 'sr') then
   begin
-    if HasWord(['što', 'tko']) then
+    // Croatian distinctive words (including very common "što"/"tko")
+    hrScore := 0;
+    if HasWord('što') then Inc(hrScore);
+    if HasWord('tko') then Inc(hrScore);
+    if HasWord('kruh') then Inc(hrScore);
+    if HasWord('sat') then Inc(hrScore);
+    if HasWord('tjedan') then Inc(hrScore);
+    if HasWord('otok') then Inc(hrScore);
+    if HasWord('zrak') then Inc(hrScore);
+    if HasWord('vlak') then Inc(hrScore);
+
+    // Bosnian distinctive words (Turkish/Arabic loanwords)
+    bsScore := 0;
+    if HasWord('kahva') then Inc(bsScore);
+    if HasWord('patka') then Inc(bsScore);
+    if HasWord('megdan') then Inc(bsScore);
+    if HasWord('dućan') then Inc(bsScore);
+    if HasWord('bajram') then Inc(bsScore);
+    if HasWord('pamuk') then Inc(bsScore);
+    if HasWord('šeher') then Inc(bsScore);
+    if HasWord('akšam') then Inc(bsScore);
+
+    // Serbian (ekavian/cyrillic)
+    srScore := 0;
+    if HasChar(['љ', 'њ', 'џ', 'ћ', 'ђ']) then srScore := 10; // very strong Cyrillic signal
+    if HasWord('voz') then Inc(srScore);
+    if HasWord('hleb') then Inc(srScore);
+    if HasWord('voziti') then Inc(srScore);
+    if HasWord('sneg') then Inc(srScore);
+    if HasWord('pevam') then Inc(srScore);
+
+    // Choose only if one language leads by at least 2 points
+    if (hrScore >= bsScore + 2) and (hrScore >= srScore + 2) then
     begin
       Code := 'hr';
       Confidence := 0.95;
       Exit;
     end;
-    if HasWord(['šta', 'ko']) then
+    if (bsScore >= hrScore + 2) and (bsScore >= srScore + 2) then
     begin
-      Confidence := 0.8;
+      Code := 'bs';
+      Confidence := 0.95;
       Exit;
     end;
-    Confidence := 0.6;
+    if (srScore >= hrScore + 2) and (srScore >= bsScore + 2) then
+    begin
+      Code := 'sr';
+      Confidence := 0.95;
+      Exit;
+    end;
+    // Otherwise keep the trigram result and lower confidence
+    Confidence := 0.60;
   end;
   {%EndRegion}
 
@@ -1132,24 +1180,33 @@ begin
   {%Region -fold Spanish vs Galician vs Portuguese}
   if (Code = 'es') or (Code = 'gl') or (Code = 'pt') then
   begin
+    // Portuguese unique markers (cedilla, ão)
     if HasChar(['ç', 'ão', 'ção', 'ções']) then
     begin
       Code := 'pt';
       Confidence := 1.0;
       Exit;
     end;
-    if HasWord(['non', 'galego', 'nós', 'vós', 'unha', 'dúas', 'ao', 'coa']) then
+
+    // Galician markers – safe now because Portuguese was already ruled out.
+    // 'nós'/'vós' are Portuguese too, but only when Portuguese markers are missing
+    // (which we already checked) can they be considered Galician.
+    if HasWord(['galego', 'unha', 'dúas', 'nós', 'vós', 'ao', 'coa', 'non']) then
     begin
       Code := 'gl';
       Confidence := 1.0;
       Exit;
     end;
+
+    // Spanish markers
     if HasChar(['ñ', '¿', '¡']) then
     begin
       Code := 'es';
       Confidence := 1.0;
       Exit;
     end;
+
+    // No distinctive feature – keep trigram result
   end;
   {%EndRegion}
 
@@ -1375,11 +1432,9 @@ begin
     if HasChar(['את ', 'על ', 'לא ', 'של ', 'הוא ', 'היא ']) then
     begin
       if (Code = 'he') or (Code = 'iw') then Confidence := 0.95;
+      // Do NOT force yi -> he; if the text is Yiddish it will be handled by Yiddish markers below
       if Code = 'yi' then
-      begin
-        Code := 'he';
-        Confidence := 0.95;
-      end;
+        Confidence := 0.50;   // lower confidence, but keep yi
       Exit;
     end;
 
@@ -1392,6 +1447,53 @@ begin
     end;
 
     if Code = 'yi' then Confidence := 0.5;
+  end;
+  {%EndRegion}
+
+  {%Region -fold Global Kurdish detection (trigrams often fail for this language)}
+  if (Code <> 'ku') and HasChar(['ê', 'î', 'û']) then
+  begin
+    if CountWords(['xwe', 'heye', 'kirin', 'çawa', 'gelek', 'çend', 'hinek', 'rojbaş', 'baş']) >= 2 then
+    begin
+      Code := 'ku';
+      Confidence := 0.95;
+      Exit;
+    end;
+    // Also treat ê/î/û with the word 'ku' as strong signal
+    if HasWord('ku') and (CountChars(['ê', 'î', 'û']) >= 2) then
+    begin
+      Code := 'ku';
+      Confidence := 0.90;
+      Exit;
+    end;
+  end;
+  {%EndRegion}
+
+  {%Region -fold Tswana vs Northern Sotho}
+  if (Code = 'tn') or (Code = 'ns') then
+  begin
+    // Short function words that are highly frequent and language‑specific.
+    // Tswana: 'go' (class 15 infinitive), 'le' (and), 'mo' (in), 'ba' (they)
+    tnMarkers := CountWords(['go', 'le', 'mo', 'ba']);
+    // Northern Sotho: 'ho' (class 15 infinitive), 'ka' (with), 'se' (not), 'sa' (still)
+    nsMarkers := CountWords(['ho', 'ka', 'se', 'sa']);
+
+    // Switch only if markers of one language are present and the other are absent.
+    if (tnMarkers > 0) and (nsMarkers = 0) then
+    begin
+      Code := 'tn';
+      Confidence := 0.95;
+      Exit;
+    end;
+    if (nsMarkers > 0) and (tnMarkers = 0) then
+    begin
+      Code := 'ns';
+      Confidence := 0.95;
+      Exit;
+    end;
+
+    // If both or none present, keep trigram result with reduced confidence.
+    Confidence := 0.60;
   end;
   {%EndRegion}
 end;
