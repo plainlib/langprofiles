@@ -18,6 +18,7 @@ unit langdetect;
 
 {$mode objfpc}{$H+}
 {$codepage utf8}
+{$DEFINE USE_BINARY_SEARCH}
 
 interface
 
@@ -34,6 +35,11 @@ type
   TStringArray = array of string;
   TWordWeightArray = array of word;   // dynamic array for word weights
 
+  TTrigEntry = record
+    Trig: string;
+    Weight: word;
+  end;
+
   TProfile = record
     Code: string;
     Trigrams: TStringArray;    // sorted by frequency, most frequent first
@@ -41,6 +47,8 @@ type
     Wrds: TStringArray;        // top frequent words (renamed to avoid conflict with 'Word')
     WrdFreqs: TWordWeightArray;// positional weights for words
     Priority: word;            // lower = more common, used for tie-breaking
+    // Sorted list for binary search (only when USE_BINARY_SEARCH = 1)
+    SortedTrigrams: array of TTrigEntry;
   end;
 
   TScriptType = (
@@ -1400,34 +1408,89 @@ var
   score: integer;                      // total accumulated score (negative = good)
   freq: integer;
   tested: integer;
+  {$IFDEF USE_BINARY_SEARCH}
+  L, R, M: integer;
+  {$ENDIF}
 begin
   score := 0;
   tested := 0;
+  {$IFDEF USE_BINARY_SEARCH}
+  // Binary search on sorted trigram list
+  if Length(Profile.SortedTrigrams) > 0 then
+  begin
+    for i := 0 to High(TextTrigrams) do
+    begin
+      L := 0;
+      R := Length(Profile.SortedTrigrams) - 1;
+      freq := -1;
+      while L <= R do
+      begin
+        M := (L + R) div 2;
+        if Profile.SortedTrigrams[M].Trig = TextTrigrams[i] then
+        begin
+          freq := Profile.SortedTrigrams[M].Weight;
+          Break;
+        end
+        else if Profile.SortedTrigrams[M].Trig < TextTrigrams[i] then
+          L := M + 1
+        else
+          R := M - 1;
+      end;
+      if freq >= 0 then
+        Dec(score, freq)
+      else
+        Inc(score, MISSING_PENALTY);
+      Inc(tested);
+    end;
+  end
+  else
+  begin
+    // Fallback to linear search if sorted list is empty (should not happen with USE_BINARY_SEARCH=1)
+    for i := 0 to High(TextTrigrams) do
+    begin
+      freq := -1;
+      for j := 0 to High(Profile.Trigrams) do
+        if Profile.Trigrams[j] = TextTrigrams[i] then
+        begin
+          if j < Length(Profile.Freqs) then
+            freq := Profile.Freqs[j]
+          else
+            freq := MAX_POS_WEIGHT - j;
+          Break;
+        end;
+      if freq >= 0 then
+        Dec(score, freq)
+      else
+        Inc(score, MISSING_PENALTY);
+      Inc(tested);
+    end;
+  end;
+  {$ELSE}
+  // Original linear search
   for i := 0 to High(TextTrigrams) do
   begin
-    freq := -1;                        // -1 means not found
+    freq := -1;
     for j := 0 to High(Profile.Trigrams) do
       if Profile.Trigrams[j] = TextTrigrams[i] then
       begin
-        // Use stored frequency if available, otherwise fallback to positional weight
         if j < Length(Profile.Freqs) then
           freq := Profile.Freqs[j]
         else
-          freq := MAX_POS_WEIGHT - j;   // first positions get higher weight
+          freq := MAX_POS_WEIGHT - j;
         Break;
       end;
-
     if freq >= 0 then
-      Dec(score, freq)                  // negative contribution (better)
+      Dec(score, freq)
     else
-      Inc(score, MISSING_PENALTY);     // positive contribution (worse)
+      Inc(score, MISSING_PENALTY);
     Inc(tested);
   end;
+  {$ENDIF}
 
   if tested = 0 then
     Result := MISSING_PENALTY
   else
-    Result := score / tested;           // average – lower (more negative) wins
+    Result := score / tested;
 end;
 
 // Uses the same tokenisation as BuildWordList in the generator.
@@ -1912,6 +1975,33 @@ var
   comprSize: cardinal;
   tempStream: TMemoryStream;
   plainStream: TMemoryStream;
+{$IFDEF USE_BINARY_SEARCH}
+// QuickSort for TTrigEntry array
+  procedure SortTrigEntries(var Arr: array of TTrigEntry; L, R: integer);
+  var
+    i, j: integer;
+    pivot, temp: TTrigEntry;
+  begin
+    if L >= R then Exit;
+    pivot := Arr[(L + R) div 2];
+    i := L;
+    j := R;
+    repeat
+      while Arr[i].Trig < pivot.Trig do Inc(i);
+      while Arr[j].Trig > pivot.Trig do Dec(j);
+      if i <= j then
+      begin
+        temp := Arr[i];
+        Arr[i] := Arr[j];
+        Arr[j] := temp;
+        Inc(i);
+        Dec(j);
+      end;
+    until i > j;
+    SortTrigEntries(Arr, L, j);
+    SortTrigEntries(Arr, i, R);
+  end;
+{$ENDIF}
 begin
   // Detect format: if first 4 bytes are 'GPRO', it's compressed
   magic := 0;
@@ -2059,6 +2149,20 @@ begin
       SetLength(fileProfiles[i].Wrds, 0);
       SetLength(fileProfiles[i].WrdFreqs, 0);
     end;
+
+    // Build sorted trigram list for binary search if optimisation is enabled
+    {$IFDEF USE_BINARY_SEARCH}
+    if trigCount > 0 then
+    begin
+      SetLength(fileProfiles[i].SortedTrigrams, trigCount);
+      for j := 0 to trigCount - 1 do
+      begin
+        fileProfiles[i].SortedTrigrams[j].Trig := fileProfiles[i].Trigrams[j];
+        fileProfiles[i].SortedTrigrams[j].Weight := fileProfiles[i].Freqs[j];
+      end;
+      SortTrigEntries(fileProfiles[i].SortedTrigrams, 0, trigCount - 1);
+    end;
+    {$ENDIF}
   end;
 
   // Merge into global Profiles
@@ -2078,6 +2182,9 @@ begin
       Profiles[existingIdx].Freqs := fileProfiles[i].Freqs;
       Profiles[existingIdx].Wrds := fileProfiles[i].Wrds;
       Profiles[existingIdx].WrdFreqs := fileProfiles[i].WrdFreqs;
+      {$IFDEF USE_BINARY_SEARCH}
+      Profiles[existingIdx].SortedTrigrams := fileProfiles[i].SortedTrigrams;
+      {$ENDIF}
     end
     else
     begin
