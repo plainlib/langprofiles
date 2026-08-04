@@ -152,8 +152,8 @@ var
   CorrByConf: array[0..4] of integer;
   WrongByConf: array[0..4] of integer;
 
-  // Helper: return bucket index (0..4) for a confidence value
-  function ConfBucket(conf: Double): integer; inline;
+// Helper: return bucket index (0..4) for a confidence value
+  function ConfBucket(conf: double): integer; inline;
   begin
     if conf < 0.2 then
       Result := 0
@@ -194,6 +194,8 @@ begin
   end;
 
   LogToFile('Scanning: ' + CorpusDir);
+  if Length(Profiles) > 0 then
+    LogToFile(Format('First Profile: %d trigrams, %d words', [Length(Profiles[0].Trigrams), Length(Profiles[0].Wrds)]));
   LogToFile('Max sample length: ' + IntToStr(MaxLen) + IfThen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
   LogToFile('----------------------------------------');
 
@@ -317,17 +319,11 @@ begin
   LogToFile(Msg);
 
   // Confidence distribution output
-  Msg := 'Correct: <0.2 ' + IntToStr(CorrByConf[0]) +
-                     ' <0.4 ' + IntToStr(CorrByConf[1]) +
-                     ' <0.6 ' + IntToStr(CorrByConf[2]) +
-                     ' <0.8 ' + IntToStr(CorrByConf[3]) +
-                     ' <1.0 ' + IntToStr(CorrByConf[4]);
+  Msg := 'Correct: <0.2 ' + IntToStr(CorrByConf[0]) + ' <0.4 ' + IntToStr(CorrByConf[1]) + ' <0.6 ' +
+    IntToStr(CorrByConf[2]) + ' <0.8 ' + IntToStr(CorrByConf[3]) + ' <1.0 ' + IntToStr(CorrByConf[4]);
   LogToFile(Msg);
-  Msg := 'Wrong:   <0.2 ' + IntToStr(WrongByConf[0]) +
-                     ' <0.4 ' + IntToStr(WrongByConf[1]) +
-                     ' <0.6 ' + IntToStr(WrongByConf[2]) +
-                     ' <0.8 ' + IntToStr(WrongByConf[3]) +
-                     ' <1.0 ' + IntToStr(WrongByConf[4]);
+  Msg := 'Wrong:   <0.2 ' + IntToStr(WrongByConf[0]) + ' <0.4 ' + IntToStr(WrongByConf[1]) + ' <0.6 ' +
+    IntToStr(WrongByConf[2]) + ' <0.8 ' + IntToStr(WrongByConf[3]) + ' <1.0 ' + IntToStr(WrongByConf[4]);
   LogToFile(Msg);
 
   Msg := Format('Test completed in %d ms.', [MilliSecondsBetween(EndTime, StartTime)]);
