@@ -798,22 +798,27 @@ procedure ApplyPostCorrection(var Code: string; var Confidence: double; const AT
 var
   KuScore, TwScore, CnScore: integer;
 
-  // Checks if a word exists with boundaries, correctly handling multiple occurrences
-  function HasWord(const Word: string): boolean;
+// Checks if a word exists with boundaries, correctly handling multiple occurrences
+  function HasWord(const word: string): boolean;
   var
     P, StartPos, Len: integer;
+    // Check if character is alphanumeric (basic Latin letters and digits)
+    function IsAlphaNum(c: char): boolean;
+    begin
+      Result := ((c >= 'a') and (c <= 'z')) or ((c >= 'A') and (c <= 'Z')) or ((c >= '0') and (c <= '9'));
+    end;
   begin
     Result := False;
-    Len := Length(Word);
+    Len := Length(word);
     if Len = 0 then Exit;
     StartPos := 1;
     while True do
     begin
-      P := Pos(Word, AText, StartPos);
+      P := Pos(word, AText, StartPos);
       if P = 0 then Exit;
-      // Check boundaries
-      if ((P = 1) or (AText[P - 1] = ' ')) and
-         ((P + Len > Length(AText)) or (AText[P + Len] = ' ')) then
+      // Check boundaries: word should be surrounded by non-alphanumeric characters or text boundaries
+      if ((P = 1) or not IsAlphaNum(AText[P - 1])) and
+         ((P + Len > Length(AText)) or not IsAlphaNum(AText[P + Len])) then
         Exit(True);
       StartPos := P + Len;
     end;
@@ -862,28 +867,78 @@ begin
   {%Region -fold Norwegian vs Danish vs Swedish}
   if (Code = 'no') or (Code = 'da') or (Code = 'sv') then
   begin
-    if HasAnyChar(['ä', 'ö']) then begin Code := 'sv'; Confidence := 1.0; Exit; end;
-    if HasWord('ikkje') then begin Code := 'no'; Confidence := 1.0; Exit; end;
+    if HasAnyChar(['ä', 'ö']) then
+    begin
+      Code := 'sv';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasWord('ikkje') then
+    begin
+      Code := 'no';
+      Confidence := 1.0;
+      Exit;
+    end;
 
     if HasWord('ikke') then
     begin
-      if HasAnyWord(['jeg', 'mig', 'dig', 'jer', 'af']) then begin Code := 'da'; Confidence := 1.0; Exit; end
-      else if HasAnyWord(['meg', 'deg', 'dere', 'av']) then begin Code := 'no'; Confidence := 1.0; Exit; end;
+      if HasAnyWord(['jeg', 'mig', 'dig', 'jer', 'af']) then
+      begin
+        Code := 'da';
+        Confidence := 1.0;
+        Exit;
+      end
+      else if HasAnyWord(['meg', 'deg', 'dere', 'av']) then
+      begin
+        Code := 'no';
+        Confidence := 1.0;
+        Exit;
+      end;
     end;
 
-    if HasAnyWord(['och', 'är', 'inte', 'att']) then begin Code := 'sv'; Confidence := 1.0; Exit; end;
-    if HasAnyWord(['meg', 'deg', 'dere', 'av', 'bruker']) then begin Code := 'no'; Confidence := 1.0; Exit; end;
-    if HasAnyWord(['mig', 'dig', 'jer', 'af', 'bruger']) then begin Code := 'da'; Confidence := 1.0; Exit; end;
+    if HasAnyWord(['och', 'är', 'inte', 'att']) then
+    begin
+      Code := 'sv';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyWord(['meg', 'deg', 'dere', 'av', 'bruker']) then
+    begin
+      Code := 'no';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyWord(['mig', 'dig', 'jer', 'af', 'bruger']) then
+    begin
+      Code := 'da';
+      Confidence := 1.0;
+      Exit;
+    end;
 
-    if HasWord('jeg') then begin Code := 'no'; Confidence := 0.9; Exit; end;
+    if HasWord('jeg') then
+    begin
+      Code := 'no';
+      Confidence := 0.9;
+      Exit;
+    end;
   end;
   {%EndRegion}
 
   {%Region -fold Xhosa vs Zulu}
   if (Code = 'xh') or (Code = 'zu') then
   begin
-    if HasAnyWord(['xh', 'kwaye', 'umntu', 'ngoku', 'kwa', 'xa', 'ndi']) then begin Code := 'xh'; Confidence := 1.0; Exit; end;
-    if HasAnyWord(['zu', 'ngi', 'uku', 'kanti', 'yena', 'lapha', 'yini', 'nini', 'lona']) then begin Code := 'zu'; Confidence := 1.0; Exit; end;
+    if HasAnyWord(['xh', 'kwaye', 'umntu', 'ngoku', 'kwa', 'xa', 'ndi']) then
+    begin
+      Code := 'xh';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyWord(['zu', 'ngi', 'uku', 'kanti', 'yena', 'lapha', 'yini', 'nini', 'lona']) then
+    begin
+      Code := 'zu';
+      Confidence := 1.0;
+      Exit;
+    end;
   end;
   {%EndRegion}
 
@@ -891,10 +946,20 @@ begin
   if (Code = 'ku') or (Code = 'tr') or (Code = 'ha') or (Code = 'id') then
   begin
     KuScore := CountChars(['ê', 'î', 'û', 'Ê', 'Î', 'Û', 'ev', 'ew', 'xw']) +
-               CountWords(['xwe', 'heye', 'gelek', 'kirin', 'çawa', 'çend', 'hinek', 'rojbaş', 'baş']);
+      CountWords(['xwe', 'heye', 'gelek', 'kirin', 'çawa', 'çend', 'hinek', 'rojbaş', 'baş']);
 
-    if KuScore >= 2 then begin Code := 'ku'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ı', 'ğ']) then begin Code := 'tr'; Confidence := 1.0; Exit; end;
+    if KuScore >= 2 then
+    begin
+      Code := 'ku';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ı', 'ğ']) then
+    begin
+      Code := 'tr';
+      Confidence := 1.0;
+      Exit;
+    end;
 
     if Code = 'ku' then Confidence := 0.5;
   end;
@@ -903,11 +968,31 @@ begin
   {%Region -fold Assamese vs Bengali}
   if (Code = 'as') or (Code = 'bn') then
   begin
-    if HasAnyChar(['ৰ', 'ৱ']) then begin Code := 'as'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['য়']) then begin Code := 'bn'; Confidence := 1.0; Exit; end;
+    if HasAnyChar(['ৰ', 'ৱ']) then
+    begin
+      Code := 'as';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['য়']) then
+    begin
+      Code := 'bn';
+      Confidence := 1.0;
+      Exit;
+    end;
 
-    if HasAnyChar(['যিটো', 'তেওঁ', 'আৰু', 'এটা', 'কৰি', 'কৰা']) then begin Code := 'as'; Confidence := 0.95; Exit; end;
-    if HasAnyChar(['যেটা', 'এবং', 'আমি', 'তিনি', 'করতে', 'করেছে']) then begin Code := 'bn'; Confidence := 0.95; Exit; end;
+    if HasAnyChar(['যিটো', 'তেওঁ', 'আৰু', 'এটা', 'কৰি', 'কৰা']) then
+    begin
+      Code := 'as';
+      Confidence := 0.95;
+      Exit;
+    end;
+    if HasAnyChar(['যেটা', 'এবং', 'আমি', 'তিনি', 'করতে', 'করেছে']) then
+    begin
+      Code := 'bn';
+      Confidence := 0.95;
+      Exit;
+    end;
 
     Confidence := 0.45;
   end;
@@ -916,8 +1001,17 @@ begin
   {%Region -fold Bosnian / Croatian / Serbian}
   if (Code = 'bs') or (Code = 'hr') or (Code = 'sr') then
   begin
-    if HasAnyWord(['što', 'tko']) then begin Code := 'hr'; Confidence := 0.95; Exit; end;
-    if HasAnyWord(['šta', 'ko']) then begin Confidence := 0.8; Exit; end;
+    if HasAnyWord(['što', 'tko']) then
+    begin
+      Code := 'hr';
+      Confidence := 0.95;
+      Exit;
+    end;
+    if HasAnyWord(['šta', 'ko']) then
+    begin
+      Confidence := 0.8;
+      Exit;
+    end;
     Confidence := 0.6;
   end;
   {%EndRegion}
@@ -925,8 +1019,18 @@ begin
   {%Region -fold Albanian vs Turkish}
   if (Code = 'sq') or (Code = 'tr') then
   begin
-    if HasAnyChar(['ë']) then begin Code := 'sq'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ı', 'ş', 'ğ']) then begin Code := 'tr'; Confidence := 1.0; Exit; end;
+    if HasAnyChar(['ë']) then
+    begin
+      Code := 'sq';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ı', 'ş', 'ğ']) then
+    begin
+      Code := 'tr';
+      Confidence := 1.0;
+      Exit;
+    end;
     Confidence := 0.7;
   end;
   {%EndRegion}
@@ -934,35 +1038,82 @@ begin
   {%Region -fold Sanskrit vs English}
   if (Code = 'sa') and (Confidence < 1.0) then
   begin
-    if HasAnyChar(['ā', 'ī', 'ū', 'ṛ', 'ṣ', 'ṃ', 'ḥ']) then begin Code := 'sa'; Confidence := 1.0; Exit; end;
+    if HasAnyChar(['ā', 'ī', 'ū', 'ṛ', 'ṣ', 'ṃ', 'ḥ']) then
+    begin
+      Code := 'sa';
+      Confidence := 1.0;
+      Exit;
+    end;
   end;
   {%EndRegion}
 
   {%Region -fold Cyrillic group: be, uk, ru, bg, mk, sr}
   if (Code = 'be') or (Code = 'uk') or (Code = 'ru') or (Code = 'bg') or (Code = 'mk') or (Code = 'sr') then
   begin
-    if HasAnyChar(['ў', 'Ў']) then begin Code := 'be'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ї', 'є', 'ґ', 'Ї', 'Є', 'Ґ']) then begin Code := 'uk'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ѓ', 'ќ', 'ѕ']) then begin Code := 'mk'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ђ', 'ћ', 'џ', 'Ђ', 'Ћ', 'Џ']) then begin Code := 'sr'; Confidence := 1.0; Exit; end;
+    if HasAnyChar(['ў', 'Ў']) then
+    begin
+      Code := 'be';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ї', 'є', 'ґ', 'Ї', 'Є', 'Ґ']) then
+    begin
+      Code := 'uk';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ѓ', 'ќ', 'ѕ']) then
+    begin
+      Code := 'mk';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ђ', 'ћ', 'џ', 'Ђ', 'Ћ', 'Џ']) then
+    begin
+      Code := 'sr';
+      Confidence := 1.0;
+      Exit;
+    end;
 
     if HasAnyChar(['ј']) then
     begin
-      if (Code = 'ru') or (Code = 'be') or (Code = 'uk') or (Code = 'bg') then begin Code := 'sr'; Confidence := 1.0; Exit; end;
-      if (Code = 'sr') or (Code = 'mk') then begin Confidence := 1.0; Exit; end;
+      if (Code = 'ru') or (Code = 'be') or (Code = 'uk') or (Code = 'bg') then
+      begin
+        Code := 'sr';
+        Confidence := 1.0;
+        Exit;
+      end;
+      if (Code = 'sr') or (Code = 'mk') then
+      begin
+        Confidence := 1.0;
+        Exit;
+      end;
     end;
 
-    if (Pos('ъ', AText) > 0) and not HasAnyChar(['ы', 'ё', 'э']) then begin Code := 'bg'; Confidence := 1.0; Exit; end;
+    if (Pos('ъ', AText) > 0) and not HasAnyChar(['ы', 'ё', 'э']) then
+    begin
+      Code := 'bg';
+      Confidence := 1.0;
+      Exit;
+    end;
 
     if HasAnyChar(['і', 'І']) then
     begin
-      if HasAnyChar(['ы', 'Ы']) then Code := 'be' else Code := 'uk';
-      Confidence := 1.0; Exit;
+      if HasAnyChar(['ы', 'Ы']) then Code := 'be'
+      else
+        Code := 'uk';
+      Confidence := 1.0;
+      Exit;
     end;
 
     if HasAnyChar(['ы', 'ё', 'э']) then
     begin
-      if (Code = 'sr') or (Code = 'mk') then begin Code := 'ru'; Confidence := 1.0; Exit; end;
+      if (Code = 'sr') or (Code = 'mk') then
+      begin
+        Code := 'ru';
+        Confidence := 1.0;
+        Exit;
+      end;
       if Code = 'ru' then Confidence := 1.0;
     end;
 
@@ -974,17 +1125,42 @@ begin
   {%Region -fold Spanish vs Galician vs Portuguese}
   if (Code = 'es') or (Code = 'gl') or (Code = 'pt') then
   begin
-    if HasAnyChar(['ç', 'ão', 'ção', 'ções']) then begin Code := 'pt'; Confidence := 1.0; Exit; end;
-    if HasAnyWord(['non', 'galego', 'nós', 'vós', 'unha', 'dúas', 'ao', 'coa']) then begin Code := 'gl'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ñ', '¿', '¡']) then begin Code := 'es'; Confidence := 1.0; Exit; end;
+    if HasAnyChar(['ç', 'ão', 'ção', 'ções']) then
+    begin
+      Code := 'pt';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyWord(['non', 'galego', 'nós', 'vós', 'unha', 'dúas', 'ao', 'coa']) then
+    begin
+      Code := 'gl';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ñ', '¿', '¡']) then
+    begin
+      Code := 'es';
+      Confidence := 1.0;
+      Exit;
+    end;
   end;
   {%EndRegion}
 
   {%Region -fold Czech vs Slovak}
   if (Code = 'cs') or (Code = 'sk') then
   begin
-    if HasAnyChar(['ä', 'ô', 'ŕ', 'ĺ']) then begin Code := 'sk'; Confidence := 1.0; Exit; end
-    else if HasAnyChar(['ř', 'ů']) then begin Code := 'cs'; Confidence := 1.0; Exit; end;
+    if HasAnyChar(['ä', 'ô', 'ŕ', 'ĺ']) then
+    begin
+      Code := 'sk';
+      Confidence := 1.0;
+      Exit;
+    end
+    else if HasAnyChar(['ř', 'ů']) then
+    begin
+      Code := 'cs';
+      Confidence := 1.0;
+      Exit;
+    end;
   end;
   {%EndRegion}
 
@@ -994,17 +1170,42 @@ begin
     TwScore := CountChars(['國', '體', '門', '機', '關', '開', '電', '學', '說', '這', '個', '為', '與', '實', '歡']);
     CnScore := CountChars(['国', '体', '门', '机', '关', '开', '电', '学', '说', '这', '个', '为', '与', '实', '欢']);
 
-    if TwScore > CnScore then begin Code := 'zh-TW'; Confidence := 1.0; Exit; end;
-    if CnScore > TwScore then begin Code := 'zh-CN'; Confidence := 1.0; Exit; end;
+    if TwScore > CnScore then
+    begin
+      Code := 'zh-TW';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if CnScore > TwScore then
+    begin
+      Code := 'zh-CN';
+      Confidence := 1.0;
+      Exit;
+    end;
   end;
   {%EndRegion}
 
   {%Region -fold Esperanto vs Khmer}
   if (Code = 'eo') or (Code = 'km') then
   begin
-    if HasAnyChar(['ĉ', 'ĝ', 'ĥ', 'ĵ', 'ŝ', 'ŭ']) then begin Code := 'eo'; Confidence := 1.0; Exit; end;
-    if HasAnyWord(['kaj', 'estas', 'estis', 'de', 'la', 'al', 'ke']) then begin Code := 'eo'; Confidence := 0.95; Exit; end;
-    if Code = 'eo' then begin Code := 'km'; Confidence := 0.7; Exit; end;
+    if HasAnyChar(['ĉ', 'ĝ', 'ĥ', 'ĵ', 'ŝ', 'ŭ']) then
+    begin
+      Code := 'eo';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyWord(['kaj', 'estas', 'estis', 'de', 'la', 'al', 'ke']) then
+    begin
+      Code := 'eo';
+      Confidence := 0.95;
+      Exit;
+    end;
+    if Code = 'eo' then
+    begin
+      Code := 'km';
+      Confidence := 0.7;
+      Exit;
+    end;
     if Code = 'km' then Confidence := 0.8;
   end;
   {%EndRegion}
@@ -1012,8 +1213,18 @@ begin
   {%Region -fold Uzbek vs Guarani}
   if (Code = 'uz') or (Code = 'gn') then
   begin
-    if HasAnyChar(['ñ', 'ã', 'ẽ', 'ĩ', 'õ', 'ũ']) then begin Code := 'gn'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['‘', 'ʼ']) then begin Code := 'uz'; Confidence := 1.0; Exit; end;
+    if HasAnyChar(['ñ', 'ã', 'ẽ', 'ĩ', 'õ', 'ũ']) then
+    begin
+      Code := 'gn';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['‘', 'ʼ']) then
+    begin
+      Code := 'uz';
+      Confidence := 1.0;
+      Exit;
+    end;
     Confidence := 0.5;
   end;
   {%EndRegion}
@@ -1021,43 +1232,157 @@ begin
   {%Region -fold Latin-script languages with unique letters vs English}
   if Code = 'en' then
   begin
-    if HasAnyChar(['ẹ', 'ọ', 'ṣ', 'Ẹ', 'Ọ', 'Ṣ']) then begin Code := 'yo'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ï', 'ụ']) then begin Code := 'ig'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ƙ', 'ɗ']) then begin Code := 'ha'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ơ', 'ư', 'ă']) then begin Code := 'vi'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ı', 'İ', 'ş', 'ğ']) then begin Code := 'tr'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ł', 'ż', 'ź']) then begin Code := 'pl'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ř', 'ů']) then begin Code := 'cs'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ŕ', 'ĺ']) then begin Code := 'sk'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ā', 'ē', 'ī', 'ū', 'ģ', 'ķ', 'ļ', 'ņ']) then begin Code := 'lv'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['į', 'ų', 'ė']) then begin Code := 'lt'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ĉ', 'ĝ', 'ĥ', 'ĵ', 'ŝ', 'ŭ']) then begin Code := 'eo'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['œ', 'Œ']) then begin Code := 'fr'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ß', 'ä', 'ö', 'ü']) then begin Code := 'de'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['þ', 'ð']) then begin Code := 'is'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ő', 'ű']) then begin Code := 'hu'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ș', 'ț']) then begin Code := 'ro'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ñ', '¿', '¡']) then begin Code := 'es'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ã', 'õ', 'ç']) then begin Code := 'pt'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ŵ', 'ŷ']) then begin Code := 'cy'; Confidence := 1.0; Exit; end;
-    if HasAnyChar(['ก']) then begin Code := 'th'; Confidence := 1.0; Exit; end;
+    if HasAnyChar(['ẹ', 'ọ', 'ṣ', 'Ẹ', 'Ọ', 'Ṣ']) then
+    begin
+      Code := 'yo';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ï', 'ụ']) then
+    begin
+      Code := 'ig';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ƙ', 'ɗ']) then
+    begin
+      Code := 'ha';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ơ', 'ư', 'ă']) then
+    begin
+      Code := 'vi';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ı', 'İ', 'ş', 'ğ']) then
+    begin
+      Code := 'tr';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ł', 'ż', 'ź']) then
+    begin
+      Code := 'pl';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ř', 'ů']) then
+    begin
+      Code := 'cs';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ŕ', 'ĺ']) then
+    begin
+      Code := 'sk';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ā', 'ē', 'ī', 'ū', 'ģ', 'ķ', 'ļ', 'ņ']) then
+    begin
+      Code := 'lv';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['į', 'ų', 'ė']) then
+    begin
+      Code := 'lt';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ĉ', 'ĝ', 'ĥ', 'ĵ', 'ŝ', 'ŭ']) then
+    begin
+      Code := 'eo';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['œ', 'Œ']) then
+    begin
+      Code := 'fr';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ß', 'ä', 'ö', 'ü']) then
+    begin
+      Code := 'de';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['þ', 'ð']) then
+    begin
+      Code := 'is';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ő', 'ű']) then
+    begin
+      Code := 'hu';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ș', 'ț']) then
+    begin
+      Code := 'ro';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ñ', '¿', '¡']) then
+    begin
+      Code := 'es';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ã', 'õ', 'ç']) then
+    begin
+      Code := 'pt';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ŵ', 'ŷ']) then
+    begin
+      Code := 'cy';
+      Confidence := 1.0;
+      Exit;
+    end;
+    if HasAnyChar(['ก']) then
+    begin
+      Code := 'th';
+      Confidence := 1.0;
+      Exit;
+    end;
   end;
   {%EndRegion}
 
   {%Region -fold Hebrew script: Hebrew vs Yiddish}
   if (Code = 'he') or (Code = 'iw') or (Code = 'yi') then
   begin
-    if HasAnyChar([#$05F0, #$05F1, #$05F2]) then begin Code := 'yi'; Confidence := 1.0; Exit; end;
+    if HasAnyChar([#$05F0, #$05F1, #$05F2]) then
+    begin
+      Code := 'yi';
+      Confidence := 1.0;
+      Exit;
+    end;
 
     if HasAnyChar(['את ', 'על ', 'לא ', 'של ', 'הוא ', 'היא ']) then
     begin
       if (Code = 'he') or (Code = 'iw') then Confidence := 0.95;
-      if Code = 'yi' then begin Code := 'he'; Confidence := 0.95; end;
+      if Code = 'yi' then
+      begin
+        Code := 'he';
+        Confidence := 0.95;
+      end;
       Exit;
     end;
 
-    if HasAnyChar([' און ', ' איך ', ' נישט ', ' דאס ', ' איז ', ' מיט ', ' פון ', ' צו ', ' מען ', ' זייער ', ' שוין ']) then
-    begin Code := 'yi'; Confidence := 0.70; Exit; end;
+    if HasAnyChar([' און ', ' איך ', ' נישט ', ' דאס ', ' איז ', ' מיט ', ' פון ',
+      ' צו ', ' מען ', ' זייער ', ' שוין ']) then
+    begin
+      Code := 'yi';
+      Confidence := 0.70;
+      Exit;
+    end;
 
     if Code = 'yi' then Confidence := 0.5;
   end;
