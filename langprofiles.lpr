@@ -289,6 +289,7 @@ var
   DedupedList: TWordFreqArray = nil;
   wIdx: integer;
   ProfileFile: string = '';
+  MaxLenSet: boolean = False;
 begin
   TestMaxLen := DEF_TEST_MAXLEN;
   TestIter := DEF_TEST_ITER;
@@ -372,9 +373,12 @@ begin
         Continue;
       end;
       // First non-option numeric value is MaxLen, second is Iter
-      if TestMaxLen = DEF_TEST_MAXLEN then
-        TestMaxLen := StrToIntDef(ParamStr(i), TestMaxLen)
-      else if TestIter = DEF_TEST_ITER then
+      if not MaxLenSet then
+      begin
+        TestMaxLen := StrToIntDef(ParamStr(i), TestMaxLen);
+        MaxLenSet := True;
+      end
+      else
         TestIter := StrToIntDef(ParamStr(i), TestIter);
       Inc(i);
     end;
