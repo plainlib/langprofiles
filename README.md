@@ -29,7 +29,36 @@ and utilities to inspect loaded profiles and test with alternative profile files
 
 ## Binary File Format
 
-*Unchanged from previous version – see the original README for the full specification.*
+All integers are little‑endian.
+
+### File layout
+
+| Offset | Field | Type | Description |
+|--------|-------|------|-------------|
+| 0 | Magic | 4 bytes | `GPRO` signature (always present for compressed format) |
+| 4 | TotalLanguages | Integer | Number of language entries |
+| 8 | LanguageBlocks | sequence | For each language: CompressedSize (Cardinal) followed by compressed data |
+
+**Note:** Older uncompressed files lack the `GPRO` magic and start directly with `TotalLanguages`.
+Reading code should first check for the magic; if it matches, the rest of the file is compressed,
+otherwise fall back to the legacy uncompressed layout.
+
+### Per-language block (after decompression)
+
+| Offset | Field | Type | Description |
+|--------|-------|------|-------------|
+| 0 | LangCodeLen | Integer | Length of the language code string |
+| 4 | LangCode | UTF‑8 bytes | Language identifier (e.g. `en`) |
+| 4 + LangCodeLen | TrigramCount | Integer | Number of trigrams that follow |
+| | *For each trigram:* | | |
+| +0 | TrigLen | Integer | Length of the trigram string |
+| +4 | Trigram | UTF‑8 bytes | The trigram itself |
+| +4 + TrigLen | Weight | Word | Positional weight (most frequent trigram = 60000, second = 59999, …) |
+| After trigrams | WordCount | Integer | Number of frequent unique words (0 for CJK languages or when words disabled) |
+| | *For each word:* | | |
+| +0 | WordLen | Integer | Length of the word string |
+| +4 | Word | UTF‑8 bytes | The word (lowercased) |
+| +4 + WordLen | Weight | Word | Positional weight (most frequent unique word = 60000, …) |
 
 ## Requirements
 
@@ -135,7 +164,18 @@ of every run and is especially useful for long generation sessions or automated 
 
 ## How It Works (Two‑Phase Generation)
 
-*Unchanged – see the original README.*
+### Phase 1 – Initial collection
+- For each language, trigrams are extracted and immediately written to a temporary file (words = 0).
+- At the same time, all candidate words are collected and saved in memory.
+
+### Phase 2 – Deduplication and final output
+- The tool scans all collected word lists to find words present in ≥ `-d` languages.
+- Those common words are discarded.
+- For each language, the remaining words are sorted by frequency, truncated to `-w`, and assigned positional weights.
+- The final profile is rebuilt: trigrams are re‑extracted (to ensure consistency) and written together with the filtered word list.
+- The output file and text dump are overwritten with the complete data.
+
+This approach guarantees that the stored words are both frequent **and** highly distinctive for their language, greatly improving detection accuracy on short texts.
 
 ## License
 
