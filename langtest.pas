@@ -148,6 +148,25 @@ var
   ResultsLine: string;
   StartTime, EndTime: TDateTime;
   Msg: string;
+  // Confidence bucket counters for correct and wrong results
+  CorrByConf: array[0..4] of integer;
+  WrongByConf: array[0..4] of integer;
+
+  // Helper: return bucket index (0..4) for a confidence value
+  function ConfBucket(conf: Double): integer; inline;
+  begin
+    if conf < 0.2 then
+      Result := 0
+    else if conf < 0.4 then
+      Result := 1
+    else if conf < 0.6 then
+      Result := 2
+    else if conf < 0.8 then
+      Result := 3
+    else
+      Result := 4;
+  end;
+
 begin
   if not DirectoryExists(CorpusDir) then
   begin
@@ -165,6 +184,13 @@ begin
     end
     else
       LogToFile('Warning: profile file not found: ' + ProfileFile);
+  end;
+
+  // Reset confidence distribution counters
+  for k := 0 to 4 do
+  begin
+    CorrByConf[k] := 0;
+    WrongByConf[k] := 0;
   end;
 
   LogToFile('Scanning: ' + CorpusDir);
@@ -207,6 +233,13 @@ begin
       begin
         TestText := UTF8Copy(RawText, 1, Min(MaxLen, TextLen));
         DetectedCode := DetectLanguageWithConfidence(TestText, Confidence);
+
+        // Update confidence distribution
+        if DetectedCode = FileNameNoExt then
+          Inc(CorrByConf[ConfBucket(Confidence)])
+        else
+          Inc(WrongByConf[ConfBucket(Confidence)]);
+
         ResultsLine := DetectedCode;
         if DetectedCode = FileNameNoExt then
           Inc(FileOK);
@@ -224,6 +257,12 @@ begin
           for k := 1 to Iter do
           begin
             DetectedCode := DetectLanguageWithConfidence(TestText, Confidence);
+
+            if DetectedCode = FileNameNoExt then
+              Inc(CorrByConf[ConfBucket(Confidence)])
+            else
+              Inc(WrongByConf[ConfBucket(Confidence)]);
+
             if k > 1 then ResultsLine := ResultsLine + ' ';
             ResultsLine := ResultsLine + DetectedCode + Format('%.2f', [Confidence]);
             if DetectedCode = FileNameNoExt then Inc(FileOK);
@@ -237,6 +276,12 @@ begin
             StartIdx := 1 + Round(k * Step);
             TestText := UTF8Copy(RawText, StartIdx, MaxLen);
             DetectedCode := DetectLanguageWithConfidence(TestText, Confidence);
+
+            if DetectedCode = FileNameNoExt then
+              Inc(CorrByConf[ConfBucket(Confidence)])
+            else
+              Inc(WrongByConf[ConfBucket(Confidence)]);
+
             if k > 0 then ResultsLine := ResultsLine + ' ';
             ResultsLine := ResultsLine + DetectedCode + Format('%.2f', [Confidence]);
             if DetectedCode = FileNameNoExt then Inc(FileOK);
@@ -270,6 +315,21 @@ begin
   LogToFile('Max sample length: ' + IntToStr(MaxLen) + IfThen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
   Msg := Format('Processed: %d tests over %d files, Correct: %d (%.1f%%)', [TotalTests, TotalTests div Iter, CorrectTests, Percent]);
   LogToFile(Msg);
+
+  // Confidence distribution output
+  Msg := 'Correct: <0.2 ' + IntToStr(CorrByConf[0]) +
+                     ' <0.4 ' + IntToStr(CorrByConf[1]) +
+                     ' <0.6 ' + IntToStr(CorrByConf[2]) +
+                     ' <0.8 ' + IntToStr(CorrByConf[3]) +
+                     ' <1.0 ' + IntToStr(CorrByConf[4]);
+  LogToFile(Msg);
+  Msg := 'Wrong:   <0.2 ' + IntToStr(WrongByConf[0]) +
+                     ' <0.4 ' + IntToStr(WrongByConf[1]) +
+                     ' <0.6 ' + IntToStr(WrongByConf[2]) +
+                     ' <0.8 ' + IntToStr(WrongByConf[3]) +
+                     ' <1.0 ' + IntToStr(WrongByConf[4]);
+  LogToFile(Msg);
+
   Msg := Format('Test completed in %d ms.', [MilliSecondsBetween(EndTime, StartTime)]);
   LogToFile(Msg);
 end;
