@@ -5,12 +5,16 @@
 //-----------------------------------------------------------------------------------
 //  uLangDetect.pas  –  Fast language detection using character trigrams
 //                      and frequent-word dictionaries for short/ambiguous texts.
-//  Always initialises a set of default profiles, then merges in any profiles
-//  found in an external binary file (langprofiles.dat).  Profiles from the
-//  file overwrite defaults for matching language codes; new codes are added.
-//  Public functions:
-//    function DetectLanguageSafe(const AText: string; ACurrentLang: string = string.Empty; MinConfidence: double = 0.5): string;
-//    function DetectLanguageWithConfidence(const AText: string; out Confidence: Double): string;
+//  Provides a static class TLangDetect with all detection methods.
+//  Call LoadProfiles once before any detection to load default and external profiles.
+//  Public class methods:
+//    ExtractCharTrigrams
+//    DetectLanguageSafe
+//    DetectLanguageForText
+//    DetectLanguageWithConfidence
+//    MergeProfilesFromFile
+//    LoadProfiles
+//    UnloadProfiles
 //  Cross-platform: Windows, Linux, macOS.  Lazarus / FPC 3.2.2+
 //-----------------------------------------------------------------------------------
 
@@ -29,11 +33,14 @@ uses
   LazUTF8,
   osutils;
 
+const
+  UNKNOWN = 'unknown';
+
   {%Region -fold Types}
 
 type
   TStringArray = array of string;
-  TWordWeightArray = array of word;   // dynamic array for word weights
+  TWordWeightArray = array of word;
 
   TTrigEntry = record
     Trig: string;
@@ -50,6 +57,8 @@ type
     // Sorted list for binary search (only when USE_BINARY_SEARCH = 1)
     SortedTrigrams: array of TTrigEntry;
   end;
+
+  TProfileArray = array of TProfile;
 
   TScriptType = (
     stLatin,
@@ -112,39 +121,78 @@ type
     Total: integer;
   end;
 
-var
-  Profiles: array of TProfile;
-
-const
-  UNKNOWN = 'unknown';
-
   {%EndRegion}
 
-//  Extract character trigrams from a UTF-8 text
-//  For texts dominated by CJK characters, spaces are ignored.
-function ExtractCharTrigrams(const AText: string): TStringArray;
+  TLangDetect = class
+  private
+    // Variables for working with profiles
+  class var FProfiles: TProfileArray;
+  class var FProfilesLoaded: boolean;
 
-// Safe language detection with optional current language hint.
-// If a current language is provided and confidence is below MinConfidence
-// but above 0.30, the result will still be accepted if the script of the
-// detected language differs from the script of the current language.
-function DetectLanguageSafe(const AText: string; ACurrentLang: string = string.Empty; MinConfidence: double = 0.5): string;
+    // Script detection by text
+    class function DetectScript(const Txt: string): TScriptInfo; static;
 
-// Returns language code (e.g. 'en', 'ru') or UNKNOWN
-function DetectLanguageForText(const AText: string): string;
+    // Detects script, refines CJK classification, and returns script info.
+    class function QuickScriptDetection(const AText: string; var Info: TScriptInfo; var Script: TScriptType;
+      out Confidence: double): string; static;
 
-// Also returns a confidence value between 0.0 and 1.0
-function DetectLanguageWithConfidence(const AText: string; out Confidence: double): string;
+    // Check if a UTF-8 character is in the CJK (Chinese/Japanese/Korean) range
+    class function IsCJK(const s: string): boolean; static;
 
-// Public wrapper for file-based loading
-procedure MergeProfilesFromFile(const FileName: string);
+    // Returns the primary script associated with a language code.
+    class function GetScriptByLang(const Code: string): TScriptType; static;
+
+    // Checks if language code matches current script
+    class function IsLanguageMatchingScript(const Code: string; Script: TScriptType): boolean; static;
+
+    // Returns a priority value for a language code. Lower value = more widely spoken.
+    class function GetLanguagePriority(const Code: string): word; static;
+
+    // Post-correction for language pairs that trigrams alone have trouble separating.
+    class procedure ApplyPostCorrection(var Code: string; var Confidence: double; const AText: string); static;
+
+    // Frequency-aware distance (lower = better).
+    class function DistanceToProfile(const TextTrigrams: TStringArray; const Profile: TProfile): double; static;
+
+    // Score a language profile by counting word matches (each token once).
+    class function ScoreByWrds(const Text: string; const Profile: TProfile): integer; static;
+
+    // Default profiles (defined in separate include file)
+    class procedure InitDefaultProfiles; static;
+
+    // Internal routine that does the actual merge from any TStream
+    class procedure MergeProfilesFromStream(AStream: TStream); static;
+  public
+    // Extract character trigrams from a UTF-8 text. For texts dominated by CJK characters, spaces are ignored.
+    class function ExtractCharTrigrams(const AText: string): TStringArray; static;
+
+    // Safe language detection with optional current language hint.
+    class function DetectLanguageSafe(const AText: string; ACurrentLang: string = string.Empty;
+      MinConfidence: double = 0.5): string; static;
+
+    // Returns language code (e.g. 'en', 'ru') or UNKNOWN
+    class function DetectLanguageForText(const AText: string): string; static;
+
+    // Also returns a confidence value between 0.0 and 1.0
+    class function DetectLanguageWithConfidence(const AText: string; out Confidence: double): string; static;
+
+    // Public wrapper for file-based loading
+    class procedure MergeProfilesFromFile(const FileName: string); static;
+
+    // Load default profiles and merge external ones (file or resource). Must be called before detection.
+    class procedure LoadProfiles; static;
+
+    // Release all loaded profiles and reset initialization flag.
+    class procedure UnloadProfiles; static;
+    // Property for accessing loaded profiles
+    class property Profiles: TProfileArray read FProfiles;
+  end;
 
 implementation
 
 {%Region -fold Private Methods}
 
-// Script detection by text
-function DetectScript(const Txt: string): TScriptInfo;
+class function TLangDetect.DetectScript(const Txt: string): TScriptInfo;
 const
   SAMPLE_SIZE = 300;
 var
@@ -409,9 +457,8 @@ begin
   Result.Script := stOther;
 end;
 
-// Detects script, refines CJK classification, and returns script info.
-// No language-specific fast rules here – all of that is now in ApplyPostCorrection.
-function QuickScriptDetection(const AText: string; var Info: TScriptInfo; var Script: TScriptType; out Confidence: double): string;
+class function TLangDetect.QuickScriptDetection(const AText: string; var Info: TScriptInfo; var Script: TScriptType;
+  out Confidence: double): string;
 begin
   Result := string.Empty;          // we never exit early with a language code
   Confidence := 0.0;
@@ -435,8 +482,7 @@ begin
   end;
 end;
 
-//  Check if a UTF-8 character is in the CJK (Chinese/Japanese/Korean) range
-function IsCJK(const s: string): boolean;
+class function TLangDetect.IsCJK(const s: string): boolean;
 var
   cp: UCS4Char;
   CharLen: integer;
@@ -453,8 +499,7 @@ begin
     ((cp >= $AC00) and (cp <= $D7AF));
 end;
 
-// Returns the primary script associated with a language code.
-function GetScriptByLang(const Code: string): TScriptType;
+class function TLangDetect.GetScriptByLang(const Code: string): TScriptType;
 begin
   // Cyrillic
   if (Code = 'ru') or (Code = 'uk') or (Code = 'be') or (Code = 'bg') or (Code = 'sr') or (Code = 'mk') or
@@ -478,7 +523,7 @@ begin
   // Hebrew
   if (Code = 'he') or (Code = 'iw') or (Code = 'yi') then Exit(stHebrew);
 
-  // Devanagari
+  // Devanagari (used by many North Indian languages)
   if (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') or (Code = 'mai') or (Code = 'new') or
     (Code = 'awa') or (Code = 'bho') then
     Exit(stDevanagari);
@@ -538,8 +583,7 @@ begin
   Result := stLatin;
 end;
 
-// Checks if language code matches current script
-function IsLanguageMatchingScript(const Code: string; Script: TScriptType): boolean;
+class function TLangDetect.IsLanguageMatchingScript(const Code: string; Script: TScriptType): boolean;
 begin
   case Script of
     stLatin:
@@ -679,10 +723,7 @@ begin
   end;
 end;
 
-// Returns a priority value for a language code.
-// Lower value = more widely spoken / higher base frequency.
-// Used for tie-breaking on very short texts.
-function GetLanguagePriority(const Code: string): word;
+class function TLangDetect.GetLanguagePriority(const Code: string): word;
 begin
   case Code of
     'en': Result := 1;
@@ -799,18 +840,17 @@ begin
   end;
 end;
 
-// Post-correction for language pairs that trigrams alone have trouble separating.
-// Optimized: fixed HasWord boundaries bug and reduced repetitive blocks via array helpers.
-procedure ApplyPostCorrection(var Code: string; var Confidence: double; const AText: string);
+class procedure TLangDetect.ApplyPostCorrection(var Code: string; var Confidence: double; const AText: string);
 var
   TwScore, CnScore: integer;
   hrScore, bsScore, srScore: integer;
   tnMarkers, nsMarkers: integer;
 
 // Checks if a word exists with boundaries, correctly handling multiple occurrences
-  function HasWord(const word: string): boolean; overload;
+  function HasWord(const word: string): boolean;
   var
     P, StartPos, Len: integer;
+
 // Check if character is alphanumeric (basic Latin letters and digits)
     function IsAlphaNum(c: char): boolean;
     begin
@@ -834,7 +874,7 @@ var
   end;
 
   // Helper to check if ANY of the words exist
-  function HasWord(const Words: array of string): boolean; overload;
+  function HasWord(const Words: array of string): boolean;
   var
     I: integer;
   begin
@@ -1498,10 +1538,7 @@ begin
   {%EndRegion}
 end;
 
-// Frequency-aware distance (lower = better).
-// For each trigram of the text, if found in profile, adds a negative penalty
-// proportional to its frequency (or rank). Missing trigrams add a fixed positive penalty.
-function DistanceToProfile(const TextTrigrams: TStringArray; const Profile: TProfile): double;
+class function TLangDetect.DistanceToProfile(const TextTrigrams: TStringArray; const Profile: TProfile): double;
 const
   MISSING_PENALTY = 100;               // penalty for a trigram not found
   MAX_POS_WEIGHT = 100;               // used when Freqs are not available
@@ -1595,10 +1632,7 @@ begin
     Result := score / tested;
 end;
 
-// Uses the same tokenisation as BuildWordList in the generator.
-// Returns total weight sum of found words; higher = better.
-// Score a language profile by counting word matches (each token once).
-function ScoreByWrds(const Text: string; const Profile: TProfile): integer;
+class function TLangDetect.ScoreByWrds(const Text: string; const Profile: TProfile): integer;
 var
   p, charLen: integer;
   ch, token: string;
@@ -1670,7 +1704,7 @@ end;
 
 {%Region -fold Public Methods}
 
-function ExtractCharTrigrams(const AText: string): TStringArray;
+class function TLangDetect.ExtractCharTrigrams(const AText: string): TStringArray;
 const
   CJK_SAMPLE_SIZE = 200;
 var
@@ -1762,7 +1796,8 @@ begin
     Result[i] := chars[i] + chars[i + 1] + chars[i + 2];
 end;
 
-function DetectLanguageSafe(const AText: string; ACurrentLang: string = string.Empty; MinConfidence: double = 0.5): string;
+class function TLangDetect.DetectLanguageSafe(const AText: string; ACurrentLang: string = string.Empty;
+  MinConfidence: double = 0.5): string;
 const
   MIN_SCRIPT_CHANGE_CONFIDENCE = 0.25;   // lower threshold when script differs
   SHORT_LEN_THRESHOLD = 10;             // below this length – require higher confidence
@@ -1812,14 +1847,14 @@ begin
   Result := UNKNOWN;
 end;
 
-function DetectLanguageForText(const AText: string): string;
+class function TLangDetect.DetectLanguageForText(const AText: string): string;
 var
   dummy: double;
 begin
   Result := DetectLanguageWithConfidence(AText, dummy);
 end;
 
-function DetectLanguageWithConfidence(const AText: string; out Confidence: double): string;
+class function TLangDetect.DetectLanguageWithConfidence(const AText: string; out Confidence: double): string;
 const
   WORD_CORRECTION_ALWAYS = 70;      // always try word correction for texts <= this length
   LOW_TRIGRAM_CONFIDENCE = 0.7;     // trigram confidence below which to try words for longer texts
@@ -1874,20 +1909,20 @@ begin
   secondDist := 1e9;
   secondIdx := -1;
 
-  for i := 0 to High(Profiles) do
+  for i := 0 to High(FProfiles) do
   begin
     if Script = stCJK then
     begin
-      if not IsCJKCodeAllowed(Profiles[i].Code) then
+      if not IsCJKCodeAllowed(FProfiles[i].Code) then
         Continue;
     end
     else
     begin
-      if not IsLanguageMatchingScript(Profiles[i].Code, Script) then
+      if not IsLanguageMatchingScript(FProfiles[i].Code, Script) then
         Continue;
     end;
 
-    currentDist := DistanceToProfile(textTrigrams, Profiles[i]);
+    currentDist := DistanceToProfile(textTrigrams, FProfiles[i]);
 
     if currentDist < bestDist then
     begin
@@ -1906,9 +1941,9 @@ begin
   // Fallback: no script match – compare against all profiles
   if bestIdx = -1 then
   begin
-    for i := 0 to High(Profiles) do
+    for i := 0 to High(FProfiles) do
     begin
-      currentDist := DistanceToProfile(textTrigrams, Profiles[i]);
+      currentDist := DistanceToProfile(textTrigrams, FProfiles[i]);
       if currentDist < bestDist then
       begin
         secondDist := bestDist;
@@ -1928,7 +1963,7 @@ begin
   // prefer a language with higher base frequency (lower Priority).
   if (UTF8Length(AText) <= 40) and (bestIdx >= 0) and (secondIdx >= 0) then
     if (bestDist > 0) and (secondDist > 0) and (secondDist < bestDist * 1.1) then
-      if Profiles[secondIdx].Priority < Profiles[bestIdx].Priority then
+      if FProfiles[secondIdx].Priority < FProfiles[bestIdx].Priority then
       begin
         bestIdx := secondIdx;
         bestDist := secondDist;
@@ -1937,20 +1972,20 @@ begin
   // 4. Build result and confidence
   if bestIdx >= 0 then
   begin
-    Result := Profiles[bestIdx].Code;
+    Result := FProfiles[bestIdx].Code;
 
     // Base confidence from hit ratio and average rank
     matchCount := 0;
     rankSum := 0;
     trigCount := Length(textTrigrams);
-    profileSize := Length(Profiles[bestIdx].Trigrams);
+    profileSize := Length(FProfiles[bestIdx].Trigrams);
     if (trigCount > 0) and (profileSize > 0) then
     begin
       for i := 0 to trigCount - 1 do
       begin
         pos := -1;
         for j := 0 to profileSize - 1 do
-          if Profiles[bestIdx].Trigrams[j] = textTrigrams[i] then
+          if FProfiles[bestIdx].Trigrams[j] = textTrigrams[i] then
           begin
             pos := j;
             Break;
@@ -2013,11 +2048,11 @@ begin
     maxWordScore := 0;
     secondWordScore := 0;
     wordIdx := -1;
-    for i := 0 to High(Profiles) do
+    for i := 0 to High(FProfiles) do
     begin
-      if (Script <> stOther) and not IsLanguageMatchingScript(Profiles[i].Code, Script) then
+      if (Script <> stOther) and not IsLanguageMatchingScript(FProfiles[i].Code, Script) then
         Continue;
-      wordScore := ScoreByWrds(AText, Profiles[i]);
+      wordScore := ScoreByWrds(AText, FProfiles[i]);
       if wordScore > maxWordScore then
       begin
         secondWordScore := maxWordScore;
@@ -2033,13 +2068,13 @@ begin
       // For short texts a narrow word-score lead is more reliable than noisy trigrams
       if (UTF8Length(AText) <= WORD_CORRECTION_ALWAYS) and (maxWordScore > secondWordScore * WORD_GAP_RATIO) then
       begin
-        Result := Profiles[wordIdx].Code;
+        Result := FProfiles[wordIdx].Code;
         Confidence := 0.9;
       end
       else
       if (secondWordScore = 0) or (maxWordScore > secondWordScore * WORD_GAP_RATIO) then
       begin
-        Result := Profiles[wordIdx].Code;
+        Result := FProfiles[wordIdx].Code;
         Confidence := 0.95;
       end;
     end;
@@ -2056,8 +2091,7 @@ end;
 //  Default profiles (defined in separate include file)
 {$include langprofiles_data.inc}
 
-// Internal routine that does the actual merge from any TStream
-procedure MergeProfilesFromStream(AStream: TStream);
+class procedure TLangDetect.MergeProfilesFromStream(AStream: TStream);
 const
   MAX_TRIGRAMS = 100000;
   MAX_WORDS = 100000;            // safety limit
@@ -2272,32 +2306,31 @@ begin
   begin
     if fileProfiles[i].Code = string.Empty then Continue;
     existingIdx := -1;
-    for j := 0 to High(Profiles) do
-      if Profiles[j].Code = fileProfiles[i].Code then
+    for j := 0 to High(FProfiles) do
+      if FProfiles[j].Code = fileProfiles[i].Code then
       begin
         existingIdx := j;
         Break;
       end;
     if existingIdx >= 0 then
     begin
-      Profiles[existingIdx].Trigrams := fileProfiles[i].Trigrams;
-      Profiles[existingIdx].Freqs := fileProfiles[i].Freqs;
-      Profiles[existingIdx].Wrds := fileProfiles[i].Wrds;
-      Profiles[existingIdx].WrdFreqs := fileProfiles[i].WrdFreqs;
+      FProfiles[existingIdx].Trigrams := fileProfiles[i].Trigrams;
+      FProfiles[existingIdx].Freqs := fileProfiles[i].Freqs;
+      FProfiles[existingIdx].Wrds := fileProfiles[i].Wrds;
+      FProfiles[existingIdx].WrdFreqs := fileProfiles[i].WrdFreqs;
       {$IFDEF USE_BINARY_SEARCH}
-      Profiles[existingIdx].SortedTrigrams := fileProfiles[i].SortedTrigrams;
+      FProfiles[existingIdx].SortedTrigrams := fileProfiles[i].SortedTrigrams;
       {$ENDIF}
     end
     else
     begin
-      SetLength(Profiles, Length(Profiles) + 1);
-      Profiles[High(Profiles)] := fileProfiles[i];
+      SetLength(FProfiles, Length(FProfiles) + 1);
+      FProfiles[High(FProfiles)] := fileProfiles[i];
     end;
   end;
 end;
 
-// Public wrapper for file-based loading
-procedure MergeProfilesFromFile(const FileName: string);
+class procedure TLangDetect.MergeProfilesFromFile(const FileName: string);
 var
   fs: TFileStream;
 begin
@@ -2313,17 +2346,20 @@ end;
 {%EndRegion}
 
 {%Region -fold Initialization}
+
+class procedure TLangDetect.LoadProfiles;
 var
   ExePath: string;
   ResStream: TResourceStream;
   idx: integer;
+begin
+  if FProfilesLoaded then Exit;
 
-initialization
   InitDefaultProfiles;
 
-  // Set default priority for built-in profiles: English gets 1, others 100
-  for idx := 0 to High(Profiles) do
-    Profiles[idx].Priority := GetLanguagePriority(Profiles[idx].Code);
+  // Set default priority for built-in profiles: English gets 1, others via GetLanguagePriority
+  for idx := 0 to High(FProfiles) do
+    FProfiles[idx].Priority := GetLanguagePriority(FProfiles[idx].Code);
 
   // Do not attempt to load external profiles when the language profile
   // generator (langprofiles) is running with the 'gen' command.
@@ -2333,7 +2369,10 @@ initialization
   if (LowerCase(ExtractFileName(ParamStr(0))) = 'langprofiles') or (LowerCase(ExtractFileName(ParamStr(0))) = 'langprofiles.exe') then
   begin
     if (ParamCount >= 1) and SameText(ParamStr(1), 'gen') then
+    begin
+      FProfilesLoaded := True;
       Exit;   // Generator mode – skip external profile loading
+    end;
   end;
 
   ExePath := ExtractFilePath(ParamStr(0));
@@ -2354,6 +2393,18 @@ initialization
     end;
   end;
 
-  {%EndRegion}
+  FProfilesLoaded := True;
+end;
+
+class procedure TLangDetect.UnloadProfiles;
+begin
+  // Release all loaded profiles and reset initialization flag.
+  // After calling this method, you can call LoadProfiles again to reload profiles.
+  SetLength(FProfiles, 0);
+  FProfilesLoaded := False;
+end;
+
+initialization
+  // Profiles are loaded only via explicit call to TLangDetect.LoadProfiles
 
 end.

@@ -298,6 +298,8 @@ begin
   MinWordLen := DEF_MIN_WORD_LEN;
   DedupThreshold := DEF_DEDUP_THRESHOLD;
 
+  TLangDetect.LoadProfiles;
+
   // Parse command line
   // Check for -i / -info before anything else
   for i := 1 to ParamCount do
@@ -439,7 +441,7 @@ begin
       begin
         LoadFromFile(fullPath, TEncoding.UTF8);
         corpusText := Text;
-        trigArray := langdetect.ExtractCharTrigrams(Text);
+        trigArray := TLangDetect.ExtractCharTrigrams(Text);
         Free;
       end;
 
@@ -616,7 +618,7 @@ begin
             begin
               LoadFromFile(fullPath, TEncoding.UTF8);
               corpusText := Text;
-              trigArray := langdetect.ExtractCharTrigrams(Text);
+              trigArray := TLangDetect.ExtractCharTrigrams(Text);
               Free;
             end;
 

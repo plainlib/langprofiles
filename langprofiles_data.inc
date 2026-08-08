@@ -8,7 +8,7 @@
   //  Expanded and refined to 150 unique 3-character trigrams each.
   // ============================================================================
 
-procedure InitDefaultProfiles;
+class procedure TLangDetect.InitDefaultProfiles;
 const
   // ----- Arabic (150 trigrams) -----
   AR: array[0..149] of string = (
@@ -28,7 +28,7 @@ const
     'وقد', 'أصب', 'شعر', 'رغم', 'كله', 'نحو', 'تلك', 'هذ ', 'ضد ', 'مدى',
     'مجا', 'حول', 'أجل', 'طرق', 'كثر', 'عشر', 'صار', 'ظل ', 'بات', 'بقي');
 
-  // ----- Belarusian (150 highly distinctive 3‑char trigrams) -----
+  // ----- Belarusian (150 highly distinctive 3-char trigrams) -----
   BE: array[0..179] of string = (
     'гэт', 'які', 'яка', 'яны', 'яна', 'пры', 'пас', 'ля ', 'пад', 'без',
     'для', 'кал', 'алі', 'там', 'тут', 'дзе', 'хто', 'чым', 'ням', 'ама',
@@ -50,7 +50,7 @@ const
     'сь ', 'нь ', 'ць ', 'цьц', 'ццё', 'ёцц', 'е ў', 'а ў', 'і ў', 'ы ў'
     );
 
-  // ----- Bulgarian (150 highly distinctive 3‑char trigrams) -----
+  // ----- Bulgarian (150 highly distinctive 3-char trigrams) -----
   BG: array[0..167] of string = (
     'ът ', 'ъв ', 'ък ', 'ъп ', 'ъс ', 'ъм ', 'та ', 'то ', 'те ', 'ят ',
     'ият', 'ата', 'ята', 'ите', 'ска', 'ско', 'ски', 'ств', 'чен', 'шка',
@@ -89,7 +89,7 @@ const
     'ář ', 'íř ', 'eř ', 'uř ', 'ař ', 'ěte', 'ete', 'íte', 'ete', 'áte',
     'íte', 'éte', 'íti', 'ěti', 'eti', 'nou', 'nou', 'tou', 'dou', 'vou');
 
-  // ----- Danish (150 highly distinctive 3‑char trigrams) -----
+  // ----- Danish (150 highly distinctive 3-char trigrams) -----
   DA: array[0..192] of string = (
     'det', 'den', 'de ', 'jeg', 'du ', 'han', 'hun', 'vi ', 'I  ', 'dem',
     'jer', 'os ', 'mig', 'dig', 'ham', 'hen', 'ikke', 'ogs', 'mås', 'sel',
@@ -405,7 +405,7 @@ const
     'tje', 'pje', 'kje', 'mje', 'sje', 'lje', 'rje', 'nje', 'wje', 'hje',
     'uw ', 'ee ', 'aa ', 'oo ', 'uu ', 'ij ', 'ei ', 'ui ', 'au ', 'ou ');
 
-  // ----- Norwegian Bokmål (150 highly distinctive 3‑char trigrams) -----
+  // ----- Norwegian Bokmål (150 highly distinctive 3-char trigrams) -----
   NO: array[0..162] of string = (
     'seg', 'ikk', 'kke', 'dere', 'skj', 'åpn', 'lukk', 'øy', 'kj', 'er ',
     'en ', 'et ', 'de ', 'vi ', 'du ', 'han', 'hun', 'den', 'det', 'der',
@@ -483,7 +483,7 @@ const
     'țit', 'ânc'
     );
 
-  // ----- Russian (150 highly distinctive 3‑char trigrams) -----
+  // ----- Russian (150 highly distinctive 3-char trigrams) -----
   RU: array[0..179] of string = (
     'что', 'это', 'как', 'так', 'все', 'всё', 'или', 'для', 'при', 'про',
     'под', 'над', 'без', 'из ', 'об ', 'от ', 'до ', 'по ', 'со ', 'во ',
@@ -624,67 +624,67 @@ const
     '不一样', '有可能', '不可能', '类似于', '取决于', '取决于', '主要'
     );
 begin
-  SetLength(Profiles, 31);
-  Profiles[0].Code := 'ar';
-  Profiles[0].Trigrams := AR;
-  Profiles[1].Code := 'be';
-  Profiles[1].Trigrams := BE;
-  Profiles[2].Code := 'bg';
-  Profiles[2].Trigrams := BG;
-  Profiles[3].Code := 'cs';
-  Profiles[3].Trigrams := CS;
-  Profiles[4].Code := 'da';
-  Profiles[4].Trigrams := DA;
-  Profiles[5].Code := 'de';
-  Profiles[5].Trigrams := DE;
-  Profiles[6].Code := 'el';
-  Profiles[6].Trigrams := EL;
-  Profiles[7].Code := 'en';
-  Profiles[7].Trigrams := EN;
-  Profiles[8].Code := 'es';
-  Profiles[8].Trigrams := ES;
-  Profiles[9].Code := 'fa';
-  Profiles[9].Trigrams := FA;
-  Profiles[10].Code := 'fi';
-  Profiles[10].Trigrams := FI;
-  Profiles[11].Code := 'fr';
-  Profiles[11].Trigrams := FR;
-  Profiles[12].Code := 'hi';
-  Profiles[12].Trigrams := HI;
-  Profiles[13].Code := 'hu';
-  Profiles[13].Trigrams := HU;
-  Profiles[14].Code := 'id';
-  Profiles[14].Trigrams := ID;
-  Profiles[15].Code := 'it';
-  Profiles[15].Trigrams := IT;
-  Profiles[16].Code := 'iw';
-  Profiles[16].Trigrams := IW;
-  Profiles[17].Code := 'ja';
-  Profiles[17].Trigrams := JA;
-  Profiles[18].Code := 'ko';
-  Profiles[18].Trigrams := KO;
-  Profiles[19].Code := 'nl';
-  Profiles[19].Trigrams := NL;
-  Profiles[20].Code := 'no';
-  Profiles[20].Trigrams := NO;
-  Profiles[21].Code := 'pl';
-  Profiles[21].Trigrams := PL;
-  Profiles[22].Code := 'pt';
-  Profiles[22].Trigrams := PT;
-  Profiles[23].Code := 'ro';
-  Profiles[23].Trigrams := RO;
-  Profiles[24].Code := 'ru';
-  Profiles[24].Trigrams := RU;
-  Profiles[25].Code := 'sv';
-  Profiles[25].Trigrams := SV;
-  Profiles[26].Code := 'th';
-  Profiles[26].Trigrams := TH;
-  Profiles[27].Code := 'tr';
-  Profiles[27].Trigrams := TR;
-  Profiles[28].Code := 'uk';
-  Profiles[28].Trigrams := UK;
-  Profiles[29].Code := 'vi';
-  Profiles[29].Trigrams := VI;
-  Profiles[30].Code := 'zh-CN';
-  Profiles[30].Trigrams := ZH;
+  SetLength(FProfiles, 31);
+  FProfiles[0].Code := 'ar';
+  FProfiles[0].Trigrams := AR;
+  FProfiles[1].Code := 'be';
+  FProfiles[1].Trigrams := BE;
+  FProfiles[2].Code := 'bg';
+  FProfiles[2].Trigrams := BG;
+  FProfiles[3].Code := 'cs';
+  FProfiles[3].Trigrams := CS;
+  FProfiles[4].Code := 'da';
+  FProfiles[4].Trigrams := DA;
+  FProfiles[5].Code := 'de';
+  FProfiles[5].Trigrams := DE;
+  FProfiles[6].Code := 'el';
+  FProfiles[6].Trigrams := EL;
+  FProfiles[7].Code := 'en';
+  FProfiles[7].Trigrams := EN;
+  FProfiles[8].Code := 'es';
+  FProfiles[8].Trigrams := ES;
+  FProfiles[9].Code := 'fa';
+  FProfiles[9].Trigrams := FA;
+  FProfiles[10].Code := 'fi';
+  FProfiles[10].Trigrams := FI;
+  FProfiles[11].Code := 'fr';
+  FProfiles[11].Trigrams := FR;
+  FProfiles[12].Code := 'hi';
+  FProfiles[12].Trigrams := HI;
+  FProfiles[13].Code := 'hu';
+  FProfiles[13].Trigrams := HU;
+  FProfiles[14].Code := 'id';
+  FProfiles[14].Trigrams := ID;
+  FProfiles[15].Code := 'it';
+  FProfiles[15].Trigrams := IT;
+  FProfiles[16].Code := 'iw';
+  FProfiles[16].Trigrams := IW;
+  FProfiles[17].Code := 'ja';
+  FProfiles[17].Trigrams := JA;
+  FProfiles[18].Code := 'ko';
+  FProfiles[18].Trigrams := KO;
+  FProfiles[19].Code := 'nl';
+  FProfiles[19].Trigrams := NL;
+  FProfiles[20].Code := 'no';
+  FProfiles[20].Trigrams := NO;
+  FProfiles[21].Code := 'pl';
+  FProfiles[21].Trigrams := PL;
+  FProfiles[22].Code := 'pt';
+  FProfiles[22].Trigrams := PT;
+  FProfiles[23].Code := 'ro';
+  FProfiles[23].Trigrams := RO;
+  FProfiles[24].Code := 'ru';
+  FProfiles[24].Trigrams := RU;
+  FProfiles[25].Code := 'sv';
+  FProfiles[25].Trigrams := SV;
+  FProfiles[26].Code := 'th';
+  FProfiles[26].Trigrams := TH;
+  FProfiles[27].Code := 'tr';
+  FProfiles[27].Trigrams := TR;
+  FProfiles[28].Code := 'uk';
+  FProfiles[28].Trigrams := UK;
+  FProfiles[29].Code := 'vi';
+  FProfiles[29].Trigrams := VI;
+  FProfiles[30].Code := 'zh-CN';
+  FProfiles[30].Trigrams := ZH;
 end;

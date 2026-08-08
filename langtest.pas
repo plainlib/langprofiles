@@ -75,7 +75,7 @@ begin
   begin
     if FileExists(ProfileFile) then
     begin
-      MergeProfilesFromFile(ProfileFile);
+      TLangDetect.MergeProfilesFromFile(ProfileFile);
       LogToFile('Additional profiles loaded from: ' + ProfileFile);
     end
     else
@@ -83,17 +83,17 @@ begin
   end;
 
   LogToFile('Profile info (loaded from langprofiles.dat or built-in):');
-  LogToFile(Format('Total languages: %d', [Length(Profiles)]));
-  for ProfIdx := 0 to High(Profiles) do
+  LogToFile(Format('Total languages: %d', [Length(TLangDetect.Profiles)]));
+  for ProfIdx := 0 to High(TLangDetect.Profiles) do
   begin
-    TrigCnt := Length(Profiles[ProfIdx].Trigrams);
-    WordCnt := Length(Profiles[ProfIdx].Wrds);
-    Msg := Format('  %-6s  trigrams: %5d', [Profiles[ProfIdx].Code, TrigCnt]);
+    TrigCnt := Length(TLangDetect.Profiles[ProfIdx].Trigrams);
+    WordCnt := Length(TLangDetect.Profiles[ProfIdx].Wrds);
+    Msg := Format('  %-6s  trigrams: %5d', [TLangDetect.Profiles[ProfIdx].Code, TrigCnt]);
     if WordCnt > 0 then
       Msg := Msg + Format('  words: %5d', [WordCnt])
     else
       Msg := Msg + '  words:     -';
-    Msg := Msg + Format('  priority: %d', [Profiles[ProfIdx].Priority]);
+    Msg := Msg + Format('  priority: %d', [TLangDetect.Profiles[ProfIdx].Priority]);
     LogToFile(Msg);
   end;
 end;
@@ -179,7 +179,7 @@ begin
   begin
     if FileExists(ProfileFile) then
     begin
-      MergeProfilesFromFile(ProfileFile);
+      TLangDetect.MergeProfilesFromFile(ProfileFile);
       LogToFile('Additional profiles loaded from: ' + ProfileFile);
     end
     else
@@ -194,8 +194,8 @@ begin
   end;
 
   LogToFile('Scanning: ' + CorpusDir);
-  if Length(Profiles) > 0 then
-    LogToFile(Format('First Profile: %d trigrams, %d words', [Length(Profiles[0].Trigrams), Length(Profiles[0].Wrds)]));
+  if Length(TLangDetect.Profiles) > 0 then
+    LogToFile(Format('First Profile: %d trigrams, %d words', [Length(TLangDetect.Profiles[0].Trigrams), Length(TLangDetect.Profiles[0].Wrds)]));
   LogToFile('Max sample length: ' + IntToStr(MaxLen) + IfThen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
   LogToFile('----------------------------------------');
 
@@ -234,7 +234,7 @@ begin
       if Iter = 1 then
       begin
         TestText := UTF8Copy(RawText, 1, Min(MaxLen, TextLen));
-        DetectedCode := DetectLanguageWithConfidence(TestText, Confidence);
+        DetectedCode := TLangDetect.DetectLanguageWithConfidence(TestText, Confidence);
 
         // Update confidence distribution
         if DetectedCode = FileNameNoExt then
@@ -258,7 +258,7 @@ begin
           TestText := RawText;
           for k := 1 to Iter do
           begin
-            DetectedCode := DetectLanguageWithConfidence(TestText, Confidence);
+            DetectedCode := TLangDetect.DetectLanguageWithConfidence(TestText, Confidence);
 
             if DetectedCode = FileNameNoExt then
               Inc(CorrByConf[ConfBucket(Confidence)])
@@ -277,7 +277,7 @@ begin
           begin
             StartIdx := 1 + Round(k * Step);
             TestText := UTF8Copy(RawText, StartIdx, MaxLen);
-            DetectedCode := DetectLanguageWithConfidence(TestText, Confidence);
+            DetectedCode := TLangDetect.DetectLanguageWithConfidence(TestText, Confidence);
 
             if DetectedCode = FileNameNoExt then
               Inc(CorrByConf[ConfBucket(Confidence)])
