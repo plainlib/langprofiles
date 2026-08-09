@@ -258,6 +258,11 @@ type
     end;
   end;
 
+  function AppPath(const RelativePath: string): string;
+  begin
+    Result := ConcatPaths([ExtractFilePath(ParamStr(0)), RelativePath]);
+  end;
+
 var
   corpusDir, outFile, txtFilePath, langCode, fullPath: string;
   sr: TSearchRec;
@@ -322,8 +327,8 @@ begin
   if (ParamCount >= 1) and SameText(ParamStr(1), 'gen') then
   begin
     // Generation mode
-    corpusDir := '.\corpus';
-    outFile := '.\langprofiles.dat';
+    corpusDir := AppPath('corpus');
+    outFile := AppPath('langprofiles.dat');
     i := 2;
     while i <= ParamCount do
     begin
@@ -352,9 +357,9 @@ begin
         Inc(i, 2);
         Continue;
       end;
-      if corpusDir = '.\corpus' then
+      if corpusDir = AppPath('corpus') then
         corpusDir := ParamStr(i)
-      else if outFile = '.\langprofiles.dat' then
+      else if outFile = AppPath('langprofiles.dat') then
         outFile := ParamStr(i);
       Inc(i);
     end;
@@ -385,7 +390,7 @@ begin
       Inc(i);
     end;
     if TestIter < 1 then TestIter := 1;
-    RunLanguageDetectionTest('.\corpus', TestMaxLen, TestIter, ProfileFile);
+    RunLanguageDetectionTest(AppPath('corpus'), TestMaxLen, TestIter, ProfileFile);
     WaitForEsc;
     Halt;
   end;

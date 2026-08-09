@@ -101,16 +101,15 @@ end;
 procedure WaitForEsc;
 {$IFDEF WINDOWS}
 var
+  Rec: TInputRecord;
   hIn: THandle;
   Mode: DWORD = 0;
-  Rec: TInputRecord;
   Read: DWORD = 0;
 {$ENDIF}
 begin
-  Rec := Default(TInputRecord);
-
   LogToFile('Press ESC to quit...');
   {$IFDEF WINDOWS}
+  Rec := Default(TInputRecord);
   hIn := GetStdHandle(STD_INPUT_HANDLE);
 
   GetConsoleMode(hIn, Mode);
@@ -173,7 +172,6 @@ begin
     LogToFile('Directory not found: ' + CorpusDir);
     Exit;
   end;
-
   // Load additional profiles if specified
   if ProfileFile <> '' then
   begin
@@ -195,19 +193,18 @@ begin
 
   LogToFile('Scanning: ' + CorpusDir);
   if Length(TLangDetect.Profiles) > 0 then
-    LogToFile(Format('First Profile: %d trigrams, %d words', [Length(TLangDetect.Profiles[0].Trigrams), Length(TLangDetect.Profiles[0].Wrds)]));
+    LogToFile(Format('First Profile: %d trigrams, %d words', [Length(TLangDetect.Profiles[0].Trigrams),
+      Length(TLangDetect.Profiles[0].Wrds)]));
   LogToFile('Max sample length: ' + IntToStr(MaxLen) + IfThen(Iter > 1, '. Samples per file: ' + IntToStr(Iter), ''));
   LogToFile('----------------------------------------');
 
   StartTime := Now;
 
-  if FindFirst(CorpusDir + '\*.txt', faAnyFile, SR) = 0 then
+  if FindFirst(ConcatPaths([CorpusDir, '*.txt']), faAnyFile, SR) = 0 then
   begin
     repeat
-      FullPath := CorpusDir + '\' + SR.Name;
-      if SR.Attr and faDirectory <> 0 then Continue;
-
-      // read whole file
+      FullPath := ConcatPaths([CorpusDir, SR.Name]);
+      if SR.Attr and faDirectory <> 0 then Continue;    // read whole file
     try
       with TStringList.Create do
       try

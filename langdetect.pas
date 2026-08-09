@@ -2404,7 +2404,4 @@ begin
   FProfilesLoaded := False;
 end;
 
-initialization
-  // Profiles are loaded only via explicit call to TLangDetect.LoadProfiles
-
 end.
