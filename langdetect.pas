@@ -139,9 +139,6 @@ type
     // Check if a UTF-8 character is in the CJK (Chinese/Japanese/Korean) range
     class function IsCJK(const s: string): boolean; static;
 
-    // Returns the primary script associated with a language code.
-    class function GetScriptByLang(const Code: string): TScriptType; static;
-
     // Checks if language code matches current script
     class function IsLanguageMatchingScript(const Code: string; Script: TScriptType): boolean; static;
 
@@ -163,6 +160,12 @@ type
     // Internal routine that does the actual merge from any TStream
     class procedure MergeProfilesFromStream(AStream: TStream); static;
   public
+    // Returns the primary script associated with a language code.
+    class function GetScriptByLang(const Code: string): TScriptType; static;
+
+    // Return True if the Unicode codepoint belongs to the given script (based on DetectScript ranges)
+    class function IsCharOfScript(cp: UCS4Char; Script: TScriptType): boolean; static;
+
     // Extract character trigrams from a UTF-8 text. For texts dominated by CJK characters, spaces are ignored.
     class function ExtractCharTrigrams(const AText: string): TStringArray; static;
 
@@ -497,90 +500,6 @@ begin
     ((cp >= $3040) and (cp <= $30FF)) or
     // Hangul Syllables (Korean)
     ((cp >= $AC00) and (cp <= $D7AF));
-end;
-
-class function TLangDetect.GetScriptByLang(const Code: string): TScriptType;
-begin
-  // Cyrillic
-  if (Code = 'ru') or (Code = 'uk') or (Code = 'be') or (Code = 'bg') or (Code = 'sr') or (Code = 'mk') or
-    (Code = 'kk') or (Code = 'ky') or (Code = 'mn') or (Code = 'tg') or (Code = 'tt') or (Code = 'ba') or
-    (Code = 'cv') or (Code = 'os') or (Code = 'sah') or (Code = 'xal') or (Code = 'ab') or (Code = 'ce') or
-    (Code = 'av') or (Code = 'udm') then
-    Exit(stCyrillic);
-
-  // Arabic
-  if (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or (Code = 'ug') or
-    (Code = 'ckb') or (Code = 'prs') or (Code = 'ku') or (Code = 'azb') then
-    Exit(stArabic);
-
-  // CJK
-  if (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko') or (Code = 'yue') then
-    Exit(stCJK);
-
-  // Greek
-  if (Code = 'el') then Exit(stGreek);
-
-  // Hebrew
-  if (Code = 'he') or (Code = 'iw') or (Code = 'yi') then Exit(stHebrew);
-
-  // Devanagari (used by many North Indian languages)
-  if (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') or (Code = 'mai') or (Code = 'new') or
-    (Code = 'awa') or (Code = 'bho') then
-    Exit(stDevanagari);
-
-  // Bengali (Assamese, Bengali)
-  if (Code = 'as') or (Code = 'bn') then Exit(stBengali);
-
-  // Gurmukhi (Punjabi)
-  if (Code = 'pa') then Exit(stGurmukhi);
-
-  // Gujarati
-  if (Code = 'gu') then Exit(stGujarati);
-
-  // Oriya
-  if (Code = 'or') then Exit(stOriya);
-
-  // Tamil
-  if (Code = 'ta') then Exit(stTamil);
-
-  // Telugu
-  if (Code = 'te') then Exit(stTelugu);
-
-  // Kannada
-  if (Code = 'kn') then Exit(stKannada);
-
-  // Malayalam
-  if (Code = 'ml') then Exit(stMalayalam);
-
-  // Sinhala
-  if (Code = 'si') then Exit(stSinhala);
-
-  // Thai
-  if (Code = 'th') then Exit(stThai);
-
-  // Lao
-  if (Code = 'lo') then Exit(stLao);
-
-  // Myanmar
-  if (Code = 'my') then Exit(stMyanmar);
-
-  // Khmer
-  if (Code = 'km') then Exit(stKhmer);
-
-  // Georgian
-  if (Code = 'ka') then Exit(stGeorgian);
-
-  // Armenian
-  if (Code = 'hy') then Exit(stArmenian);
-
-  // Ethiopic (Amharic, etc.)
-  if (Code = 'am') or (Code = 'ti') then Exit(stEthiopic);
-
-  // Tibetan
-  if (Code = 'bo') or (Code = 'dz') then Exit(stTibetan);
-
-  // Everything else is Latin script (covers all other world languages)
-  Result := stLatin;
 end;
 
 class function TLangDetect.IsLanguageMatchingScript(const Code: string; Script: TScriptType): boolean;
@@ -1703,6 +1622,152 @@ end;
 {%EndRegion}
 
 {%Region -fold Public Methods}
+
+class function TLangDetect.GetScriptByLang(const Code: string): TScriptType;
+begin
+  // Cyrillic
+  if (Code = 'ru') or (Code = 'uk') or (Code = 'be') or (Code = 'bg') or (Code = 'sr') or (Code = 'mk') or
+    (Code = 'kk') or (Code = 'ky') or (Code = 'mn') or (Code = 'tg') or (Code = 'tt') or (Code = 'ba') or
+    (Code = 'cv') or (Code = 'os') or (Code = 'sah') or (Code = 'xal') or (Code = 'ab') or (Code = 'ce') or
+    (Code = 'av') or (Code = 'udm') then
+    Exit(stCyrillic);
+
+  // Arabic
+  if (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or (Code = 'ug') or
+    (Code = 'ckb') or (Code = 'prs') or (Code = 'ku') or (Code = 'azb') then
+    Exit(stArabic);
+
+  // CJK
+  if (Code = 'zh') or (Code = 'zh-CN') or (Code = 'zh-TW') or (Code = 'ja') or (Code = 'ko') or (Code = 'yue') then
+    Exit(stCJK);
+
+  // Greek
+  if (Code = 'el') then Exit(stGreek);
+
+  // Hebrew
+  if (Code = 'he') or (Code = 'iw') or (Code = 'yi') then Exit(stHebrew);
+
+  // Devanagari (used by many North Indian languages)
+  if (Code = 'hi') or (Code = 'mr') or (Code = 'ne') or (Code = 'sa') or (Code = 'mai') or (Code = 'new') or
+    (Code = 'awa') or (Code = 'bho') then
+    Exit(stDevanagari);
+
+  // Bengali (Assamese, Bengali)
+  if (Code = 'as') or (Code = 'bn') then Exit(stBengali);
+
+  // Gurmukhi (Punjabi)
+  if (Code = 'pa') then Exit(stGurmukhi);
+
+  // Gujarati
+  if (Code = 'gu') then Exit(stGujarati);
+
+  // Oriya
+  if (Code = 'or') then Exit(stOriya);
+
+  // Tamil
+  if (Code = 'ta') then Exit(stTamil);
+
+  // Telugu
+  if (Code = 'te') then Exit(stTelugu);
+
+  // Kannada
+  if (Code = 'kn') then Exit(stKannada);
+
+  // Malayalam
+  if (Code = 'ml') then Exit(stMalayalam);
+
+  // Sinhala
+  if (Code = 'si') then Exit(stSinhala);
+
+  // Thai
+  if (Code = 'th') then Exit(stThai);
+
+  // Lao
+  if (Code = 'lo') then Exit(stLao);
+
+  // Myanmar
+  if (Code = 'my') then Exit(stMyanmar);
+
+  // Khmer
+  if (Code = 'km') then Exit(stKhmer);
+
+  // Georgian
+  if (Code = 'ka') then Exit(stGeorgian);
+
+  // Armenian
+  if (Code = 'hy') then Exit(stArmenian);
+
+  // Ethiopic (Amharic, etc.)
+  if (Code = 'am') or (Code = 'ti') then Exit(stEthiopic);
+
+  // Tibetan
+  if (Code = 'bo') or (Code = 'dz') then Exit(stTibetan);
+
+  // Everything else is Latin script (covers all other world languages)
+  Result := stLatin;
+end;
+
+class function TLangDetect.IsCharOfScript(cp: UCS4Char; Script: TScriptType): boolean;
+begin
+  Result := False;
+  case Script of
+    stLatin:
+      Result := ((cp >= $41) and (cp <= $5A)) or ((cp >= $61) and (cp <= $7A)) or ((cp >= $C0) and (cp <= $24F)) or
+        ((cp >= $1E00) and (cp <= $1EFF)) or ((cp >= $2C60) and (cp <= $2C7F));
+    stCyrillic:
+      Result := (cp >= $400) and (cp <= $4FF);
+    stArabic:
+      Result := ((cp >= $600) and (cp <= $6FF)) or ((cp >= $750) and (cp <= $77F));
+    stGreek:
+      Result := (cp >= $370) and (cp <= $3FF);
+    stHebrew:
+      Result := (cp >= $590) and (cp <= $5FF);
+    stDevanagari:
+      Result := (cp >= $900) and (cp <= $97F);
+    stBengali:
+      Result := (cp >= $980) and (cp <= $9FF);
+    stGurmukhi:
+      Result := (cp >= $A00) and (cp <= $A7F);
+    stGujarati:
+      Result := (cp >= $A80) and (cp <= $AFF);
+    stOriya:
+      Result := (cp >= $B00) and (cp <= $B7F);
+    stTamil:
+      Result := (cp >= $B80) and (cp <= $BFF);
+    stTelugu:
+      Result := (cp >= $C00) and (cp <= $C7F);
+    stKannada:
+      Result := (cp >= $C80) and (cp <= $CFF);
+    stMalayalam:
+      Result := (cp >= $D00) and (cp <= $D7F);
+    stSinhala:
+      Result := (cp >= $D80) and (cp <= $DFF);
+    stThai:
+      Result := (cp >= $E00) and (cp <= $E7F);
+    stLao:
+      Result := (cp >= $E80) and (cp <= $EFF);
+    stMyanmar:
+      Result := (cp >= $1000) and (cp <= $109F);
+    stKhmer:
+      Result := (cp >= $1780) and (cp <= $17FF);
+    stGeorgian:
+      Result := (cp >= $10A0) and (cp <= $10FF);
+    stArmenian:
+      Result := (cp >= $530) and (cp <= $58F);
+    stEthiopic:
+      Result := (cp >= $1200) and (cp <= $137F);
+    stTibetan:
+      Result := (cp >= $F00) and (cp <= $FFF);
+    stCJK:
+      Result := ((cp >= $3400) and (cp <= $4DBF)) or   // Han
+        ((cp >= $4E00) and (cp <= $9FFF)) or ((cp >= $20000) and (cp <= $2A6DF)) or ((cp >= $3040) and (cp <= $309F)) or
+        // Hiragana
+        ((cp >= $30A0) and (cp <= $30FF)) or   // Katakana
+        ((cp >= $AC00) and (cp <= $D7AF));      // Hangul
+    else
+      Result := True;   // stOther
+  end;
+end;
 
 class function TLangDetect.ExtractCharTrigrams(const AText: string): TStringArray;
 const
