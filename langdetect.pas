@@ -516,7 +516,7 @@ begin
         (Code = 'av') or (Code = 'udm') or
         // Arabic script
         (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or (Code = 'ug') or
-        (Code = 'ckb') or (Code = 'prs') or (Code = 'ku') or (Code = 'azb') or
+        (Code = 'ckb') or (Code = 'prs') or (Code = 'azb') or
         // Greek
         (Code = 'el') or
         // Hebrew
@@ -571,7 +571,7 @@ begin
     // Arabic script
     stArabic:
       Result := (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or
-        (Code = 'ug') or (Code = 'ckb') or (Code = 'prs') or (Code = 'ku') or (Code = 'azb');
+        (Code = 'ug') or (Code = 'ckb') or (Code = 'prs') or (Code = 'azb');
 
     stGreek: Result := (Code = 'el');
     stHebrew: Result := (Code = 'he') or (Code = 'iw') or (Code = 'yi');
@@ -1634,7 +1634,7 @@ begin
 
   // Arabic
   if (Code = 'ar') or (Code = 'fa') or (Code = 'ur') or (Code = 'ps') or (Code = 'sd') or (Code = 'ug') or
-    (Code = 'ckb') or (Code = 'prs') or (Code = 'ku') or (Code = 'azb') then
+    (Code = 'ckb') or (Code = 'prs') or (Code = 'azb') then
     Exit(stArabic);
 
   // CJK
