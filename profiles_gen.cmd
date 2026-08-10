@@ -1,1 +1,1 @@
-langprofiles gen -n 1500 -w 500 -f 0 corpus langprofiles.dat
+langprofiles gen -n 1500 -w 500 corpus langprofiles.dat

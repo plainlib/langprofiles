@@ -130,7 +130,9 @@ begin
     p := 1;
     while p <= Length(Txt) do
     begin
+      {$NOTES OFF}
       charLen := UTF8CodepointSize(@Txt[p]);
+      {$NOTES ON}
       if charLen = 0 then
       begin
         Inc(p);
@@ -165,7 +167,9 @@ begin
     p := 1;
     while p <= Length(S) do
     begin
+      {$NOTES OFF}
       charLen := UTF8CodepointSize(@S[p]);
+      {$NOTES ON}
       if charLen = 0 then
       begin
         Inc(p);
