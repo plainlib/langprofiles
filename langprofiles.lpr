@@ -66,7 +66,7 @@ const
   POS_WEIGHT_BASE = 60000;                  // weight assigned to the most frequent trigram/word, decreasing by rank
   DEF_DEDUP_THRESHOLD = 2;                  // remove words that appear in this many or more different languages
   DEF_TRIG_DEDUP_THRESHOLD = 0;             // default trigram dedup threshold (0=off)
-  DEF_FILTER_LETTER = 1;                    // default filter out trigrams containing non-script-letter
+  DEF_FILTER_LETTER = 0;                    // default filter out trigrams containing non-script-letter
   MAGIC_COMPRESSED: array[0..3] of byte = ($47, $50, $52, $4F);  // "GPRO" – magic marker indicating zlib-compressed profile format
   DEF_TEST_MAXLEN = 500;                    // default maximum text length for the detection test
   DEF_TEST_ITER = 3;                        // default number of test iterations for each sample length

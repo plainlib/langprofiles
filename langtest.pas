@@ -15,20 +15,12 @@ unit langtest;
 
 interface
 
-// Pause with exit via ESC
 procedure WaitForEsc;
 
-// Run language detection test on corpus files in the given directory.
-// MaxLen: maximum number of characters taken from each file (starting at 1).
-// Iter:   number of samples per file (sliding window if file longer than MaxLen).
-// ProfileFile: if not empty, additional profile file is loaded before testing.
 procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Iter: integer; const ProfileFile: string = '');
 
-// Write a message to both console and a log file.
-// LogFileName defaults to 'langprofiles.log' in the application folder.
-procedure LogToFile(const Msg: string; const LogFileName: string = 'langprofiles.log');
+procedure LogToFile(const Msg: string; const LogFileName: string = 'langprofiles.log'; LogToConsole: boolean = True);
 
-// Print information about currently loaded language profiles.
 procedure ShowLoadedProfilesInfo(const ProfileFile: string = '');
 
 implementation
@@ -42,18 +34,19 @@ uses
   Classes,
   LazUTF8,
   Math,
-  DateUtils,        // for MilliSecondsBetween
+  DateUtils,
   langdetect;
 
 const
   BOM_UTF8 = #239#187#191;
 
-procedure LogToFile(const Msg: string; const LogFileName: string = 'langprofiles.log');
+procedure LogToFile(const Msg: string; const LogFileName: string = 'langprofiles.log'; LogToConsole: boolean = True);
 var
   LogPath: string;
   LogFile: TextFile;
 begin
-  WriteLn(Msg);
+  if LogToConsole then
+    WriteLn(Msg);
   LogPath := ExtractFilePath(ParamStr(0)) + LogFileName;
   AssignFile(LogFile, LogPath);
   if FileExists(LogPath) then
@@ -64,15 +57,40 @@ begin
   CloseFile(LogFile);
 end;
 
+procedure WaitForEsc;
+{$IFDEF WINDOWS}
+var
+  Rec: TInputRecord;
+  hIn: THandle;
+  Mode: DWORD = 0;
+  Read: DWORD = 0;
+{$ENDIF}
+begin
+  LogToFile('Press ESC to quit...');
+  {$IFDEF WINDOWS}
+  Rec := Default(TInputRecord);
+  hIn := GetStdHandle(STD_INPUT_HANDLE);
+  GetConsoleMode(hIn, Mode);
+  SetConsoleMode(hIn, ENABLE_PROCESSED_INPUT or ENABLE_WINDOW_INPUT);
+  repeat
+    ReadConsoleInput(hIn, Rec, 1, Read);
+    if (Rec.EventType = KEY_EVENT) and
+       Rec.Event.KeyEvent.bKeyDown and
+       (Rec.Event.KeyEvent.wVirtualKeyCode = VK_ESCAPE) then
+      Break;
+  until False;
+  {$ELSE}
+  Readln;
+  {$ENDIF}
+end;
+
 procedure ShowLoadedProfilesInfo(const ProfileFile: string = '');
 var
   ProfIdx: integer;
   TrigCnt, WordCnt: integer;
   Msg: string;
 begin
-  // Load additional profiles if requested
   if ProfileFile <> '' then
-  begin
     if FileExists(ProfileFile) then
     begin
       TLangDetect.MergeProfilesFromFile(ProfileFile);
@@ -80,7 +98,6 @@ begin
     end
     else
       LogToFile('Warning: profile file not found: ' + ProfileFile);
-  end;
 
   LogToFile('Profile info (loaded from langprofiles.dat or built-in):');
   LogToFile(Format('Total languages: %d', [Length(TLangDetect.Profiles)]));
@@ -98,34 +115,95 @@ begin
   end;
 end;
 
-procedure WaitForEsc;
-{$IFDEF WINDOWS}
+// Keep only characters belonging to the target script and spaces
+function FilterTextByScript(const Txt: string; const LangCode: string): string;
 var
-  Rec: TInputRecord;
-  hIn: THandle;
-  Mode: DWORD = 0;
-  Read: DWORD = 0;
-{$ENDIF}
+  Script: TScriptType;
+  sb: TStringBuilder;
+  p, charLen: integer;
+  cp: UCS4Char;
+  ch: string;
 begin
-  LogToFile('Press ESC to quit...');
-  {$IFDEF WINDOWS}
-  Rec := Default(TInputRecord);
-  hIn := GetStdHandle(STD_INPUT_HANDLE);
+  sb := TStringBuilder.Create;
+  try
+    Script := TLangDetect.GetScriptByLang(LangCode);
+    p := 1;
+    while p <= Length(Txt) do
+    begin
+      charLen := UTF8CodepointSize(@Txt[p]);
+      if charLen = 0 then
+      begin
+        Inc(p);
+        Continue;
+      end;
+      ch := Copy(Txt, p, charLen);
+      cp := UTF8CodepointToUnicode(PChar(ch), charLen);
 
-  GetConsoleMode(hIn, Mode);
-  SetConsoleMode(hIn, ENABLE_PROCESSED_INPUT or ENABLE_WINDOW_INPUT);
+      // Keep spaces and characters that belong to the target script
+      if (cp = $20) or TLangDetect.IsCharOfScript(cp, Script) then
+        sb.Append(ch);
 
-  repeat
-    ReadConsoleInput(hIn, Rec, 1, Read);
+      Inc(p, charLen);
+    end;
+    Result := sb.ToString;
+  finally
+    sb.Free;
+  end;
+end;
 
-    if (Rec.EventType = KEY_EVENT) and
-       Rec.Event.KeyEvent.bKeyDown and
-       (Rec.Event.KeyEvent.wVirtualKeyCode = VK_ESCAPE) then
-      Break;
-  until False;
-  {$ELSE}
-  Readln;
-  {$ENDIF}
+// Collapse multiple spaces into one and trim leading/trailing spaces
+function NormalizeSpaces(const S: string): string;
+var
+  p, charLen: integer;
+  ch: string;
+  prevSpace: boolean;
+  sb: TStringBuilder;
+begin
+  sb := TStringBuilder.Create;
+  try
+    prevSpace := True;   // remove leading spaces
+    p := 1;
+    while p <= Length(S) do
+    begin
+      charLen := UTF8CodepointSize(@S[p]);
+      if charLen = 0 then
+      begin
+        Inc(p);
+        Continue;
+      end;
+      ch := Copy(S, p, charLen);
+      if ch = ' ' then
+      begin
+        if not prevSpace then
+          sb.Append(' ');
+        prevSpace := True;
+      end
+      else
+      begin
+        sb.Append(ch);
+        prevSpace := False;
+      end;
+      Inc(p, charLen);
+    end;
+    Result := Trim(sb.ToString);
+  finally
+    sb.Free;
+  end;
+end;
+
+// Extract a sample of exactly DesiredLen (after cleaning) from a raw fragment
+function PrepareTestSample(const RawText: string; StartIdx: integer; DesiredLen: integer; const LangCode: string): string;
+var
+  Temp: string;
+begin
+  // Take a larger window to compensate for filtered-out characters
+  Temp := UTF8Copy(RawText, StartIdx, DesiredLen * 10);
+  Temp := FilterTextByScript(Temp, LangCode);
+  Temp := NormalizeSpaces(Temp);
+  // Cut to the exact desired length (or less if not enough characters remain)
+  if UTF8Length(Temp) > DesiredLen then
+    Temp := UTF8Copy(Temp, 1, DesiredLen);
+  Result := Temp;
 end;
 
 procedure RunLanguageDetectionTest(const CorpusDir: string; MaxLen: integer; Iter: integer; const ProfileFile: string = '');
@@ -147,11 +225,10 @@ var
   ResultsLine: string;
   StartTime, EndTime: TDateTime;
   Msg: string;
-  // Confidence bucket counters for correct and wrong results
   CorrByConf: array[0..4] of integer;
   WrongByConf: array[0..4] of integer;
+  EffectiveLen: integer;   // working area: we don't sample the last MaxLen chars
 
-// Helper: return bucket index (0..4) for a confidence value
   function ConfBucket(conf: double): integer; inline;
   begin
     if conf < 0.2 then
@@ -172,9 +249,8 @@ begin
     LogToFile('Directory not found: ' + CorpusDir);
     Exit;
   end;
-  // Load additional profiles if specified
+
   if ProfileFile <> '' then
-  begin
     if FileExists(ProfileFile) then
     begin
       TLangDetect.MergeProfilesFromFile(ProfileFile);
@@ -182,9 +258,7 @@ begin
     end
     else
       LogToFile('Warning: profile file not found: ' + ProfileFile);
-  end;
 
-  // Reset confidence distribution counters
   for k := 0 to 4 do
   begin
     CorrByConf[k] := 0;
@@ -204,7 +278,7 @@ begin
   begin
     repeat
       FullPath := ConcatPaths([CorpusDir, SR.Name]);
-      if SR.Attr and faDirectory <> 0 then Continue;    // read whole file
+      if SR.Attr and faDirectory <> 0 then Continue;
     try
       with TStringList.Create do
       try
@@ -218,85 +292,101 @@ begin
       Continue;
     end;
 
-      // strip UTF-8 BOM if present
       if Copy(RawText, 1, 3) = BOM_UTF8 then
         Delete(RawText, 1, 3);
 
       FileNameNoExt := ChangeFileExt(SR.Name, '');
       TextLen := UTF8Length(RawText);
-      FileTotal := Iter;
+      FileTotal := 0;   // will count actual non-empty samples
       FileOK := 0;
       ResultsLine := '';
 
       if Iter = 1 then
       begin
-        TestText := UTF8Copy(RawText, 1, Min(MaxLen, TextLen));
-        DetectedCode := TLangDetect.DetectLanguageWithConfidence(TestText, Confidence);
-
-        // Update confidence distribution
-        if DetectedCode = FileNameNoExt then
-          Inc(CorrByConf[ConfBucket(Confidence)])
+        TestText := PrepareTestSample(RawText, 1, MaxLen, FileNameNoExt);
+        // Even a single sample may be empty if the file has no valid characters
+        if TestText <> '' then
+        begin
+          DetectedCode := TLangDetect.DetectLanguageWithConfidence(TestText, Confidence);
+          if DetectedCode = FileNameNoExt then
+            Inc(CorrByConf[ConfBucket(Confidence)])
+          else
+            Inc(WrongByConf[ConfBucket(Confidence)]);
+          if DetectedCode = FileNameNoExt then Inc(FileOK);
+          Msg := Format('%s -> %s (%.2f) %s', [SR.Name, DetectedCode, Confidence, BoolToStr(
+            DetectedCode = FileNameNoExt, 'OK', 'FAIL expected ' + FileNameNoExt)]);
+          LogToFile(Msg);
+          FileTotal := 1;
+          Inc(TotalTests);
+          Inc(CorrectTests, FileOK);
+        end
         else
-          Inc(WrongByConf[ConfBucket(Confidence)]);
-
-        ResultsLine := DetectedCode;
-        if DetectedCode = FileNameNoExt then
-          Inc(FileOK);
-        Msg := Format('%s -> %s (%.2f) %s', [SR.Name, DetectedCode, Confidence, BoolToStr(DetectedCode =
-          FileNameNoExt, 'OK', 'FAIL expected ' + FileNameNoExt)]);
-        LogToFile(Msg);
-        Inc(TotalTests);
-        Inc(CorrectTests, FileOK);
+          LogToFile(SR.Name + ' -> SKIP (empty after cleaning)');
       end
       else
       begin
-        if TextLen <= MaxLen then
+        EffectiveLen := TextLen - MaxLen;
+        if EffectiveLen < 1 then
+          EffectiveLen := 1;   // whole file is used
+
+        if EffectiveLen <= MaxLen then
         begin
-          TestText := RawText;
-          for k := 1 to Iter do
+          // File is small – take the entire cleaned text once and repeat detection
+          TestText := PrepareTestSample(RawText, 1, TextLen, FileNameNoExt);
+          if TestText <> '' then
           begin
-            DetectedCode := TLangDetect.DetectLanguageWithConfidence(TestText, Confidence);
-
-            if DetectedCode = FileNameNoExt then
-              Inc(CorrByConf[ConfBucket(Confidence)])
-            else
-              Inc(WrongByConf[ConfBucket(Confidence)]);
-
-            if k > 1 then ResultsLine := ResultsLine + ' ';
-            ResultsLine := ResultsLine + DetectedCode + Format('%.2f', [Confidence]);
-            if DetectedCode = FileNameNoExt then Inc(FileOK);
-          end;
+            FileTotal := Iter;
+            for k := 1 to Iter do
+            begin
+              DetectedCode := TLangDetect.DetectLanguageWithConfidence(TestText, Confidence);
+              if DetectedCode = FileNameNoExt then
+                Inc(CorrByConf[ConfBucket(Confidence)])
+              else
+                Inc(WrongByConf[ConfBucket(Confidence)]);
+              if k > 1 then ResultsLine := ResultsLine + ' ';
+              ResultsLine := ResultsLine + DetectedCode + Format('%.2f', [Confidence]);
+              if DetectedCode = FileNameNoExt then Inc(FileOK);
+            end;
+            Inc(TotalTests, FileTotal);
+            Inc(CorrectTests, FileOK);
+          end
+          else
+            LogToFile(SR.Name + ' -> SKIP (empty after cleaning)');
         end
         else
         begin
-          Step := (TextLen - MaxLen) / (Iter - 1);
+          // Sliding window over the safe area
+          Step := (EffectiveLen - MaxLen) / (Iter - 1);
           for k := 0 to Iter - 1 do
           begin
             StartIdx := 1 + Round(k * Step);
-            TestText := UTF8Copy(RawText, StartIdx, MaxLen);
+            TestText := PrepareTestSample(RawText, StartIdx, MaxLen, FileNameNoExt);
+            if TestText = '' then
+              Continue;   // should not happen in the safe area, but be robust
             DetectedCode := TLangDetect.DetectLanguageWithConfidence(TestText, Confidence);
-
             if DetectedCode = FileNameNoExt then
               Inc(CorrByConf[ConfBucket(Confidence)])
             else
               Inc(WrongByConf[ConfBucket(Confidence)]);
-
             if k > 0 then ResultsLine := ResultsLine + ' ';
             ResultsLine := ResultsLine + DetectedCode + Format('%.2f', [Confidence]);
             if DetectedCode = FileNameNoExt then Inc(FileOK);
           end;
+          FileTotal := Iter;
+          Inc(TotalTests, FileTotal);
+          Inc(CorrectTests, FileOK);
         end;
 
-        Msg := Format('%s -> %d/%d', [SR.Name, FileOK, FileTotal]);
-        if FileOK = FileTotal then
-          Msg := Msg + ' OK (all correct)'
-        else
-          Msg := Msg + Format(' FAIL expected %s', [FileNameNoExt]);
-        Msg := Msg + ' [' + ResultsLine + ']';
-        LogToFile(Msg);
-
-        Inc(TotalTests, FileTotal);
-        Inc(CorrectTests, FileOK);
+        if FileTotal > 0 then
+        begin
+          Msg := Format('%s -> %d/%d', [SR.Name, FileOK, FileTotal]);
+          if FileOK = FileTotal then
+            Msg := Msg + ' OK (all correct)'
+          else
+            Msg := Msg + Format(' FAIL expected %s', [FileNameNoExt]);
+          Msg := Msg + ' [' + ResultsLine + ']';
+          LogToFile(Msg);
+        end;
       end;
 
     until FindNext(SR) <> 0;
@@ -315,7 +405,6 @@ begin
   Msg := Format('Processed: %d tests over %d files, Correct: %d (%.1f%%)', [TotalTests, TotalTests div Iter, CorrectTests, Percent]);
   LogToFile(Msg);
 
-  // Confidence distribution output
   Msg := 'Correct: <0.2 ' + IntToStr(CorrByConf[0]) + ' <0.4 ' + IntToStr(CorrByConf[1]) + ' <0.6 ' +
     IntToStr(CorrByConf[2]) + ' <0.8 ' + IntToStr(CorrByConf[3]) + ' <1.0 ' + IntToStr(CorrByConf[4]);
   LogToFile(Msg);
