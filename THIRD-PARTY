@@ -1,0 +1,16 @@
+THIRD-PARTY RESOURCES
+
+This application uses third-party resources under the following licenses:
+
+1. FineWeb2 language data used to generate language profiles
+   License: Open Data Commons Attribution License v1.0 (ODC-By)
+   https://huggingface.co/datasets/HuggingFaceFW/fineweb-2
+   https://opendatacommons.org/licenses/by/1-0/
+
+   FineWeb2 is sourced from Common Crawl and is also subject to
+   Common Crawl's Terms of Use.
+
+2. Language corpora used to generate language profiles
+   Source: xu-song/cc100-samples
+   License: Unknown
+   https://huggingface.co/datasets/xu-song/cc100-samples
