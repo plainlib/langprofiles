@@ -51,7 +51,7 @@ LANGUAGES = {
     "ig":    "ibo_Latn",   # Igbo
     "is":    "isl_Latn",   # Icelandic
     "it":    "ita_Latn",   # Italian
-    "iw":    "heb_Hebr",   # Hebrew
+    "he":    "heb_Hebr",   # Hebrew
     "ja":    "jpn_Jpan",   # Japanese
     "jv":    "jav_Latn",   # Javanese
     "ka":    "kat_Geor",   # Georgian

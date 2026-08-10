@@ -169,6 +169,9 @@ type
     // Extract character trigrams from a UTF-8 text. For texts dominated by CJK characters, spaces are ignored.
     class function ExtractCharTrigrams(const AText: string): TStringArray; static;
 
+    // Normalize language codes and regional variants to canonical language codes.
+    class function NormalizeLanguageCode(const Code: string): string;
+
     // Safe language detection with optional current language hint.
     class function DetectLanguageSafe(const AText: string; ACurrentLang: string = string.Empty;
       MinConfidence: double = 0.5): string; static;
@@ -1859,6 +1862,27 @@ begin
   SetLength(Result, Length(chars) - 2);
   for i := 0 to High(Result) do
     Result[i] := chars[i] + chars[i + 1] + chars[i + 2];
+end;
+
+class function TLangDetect.NormalizeLanguageCode(const Code: string): string;
+begin
+  case LowerCase(Code) of
+    'iw': Result := 'he'; // Hebrew
+    'in': Result := 'id'; // Indonesian
+    'ji': Result := 'yi'; // Yiddish
+
+    'zh',
+    'zh-cn',
+    'zh-sg',
+    'zh-hans': Result := 'zh-CN'; // Simplified Chinese
+
+    'zh-tw',
+    'zh-hk',
+    'zh-mo',
+    'zh-hant': Result := 'zh-TW'; // Traditional Chinese
+    else
+      Result := LowerCase(Code);
+  end;
 end;
 
 class function TLangDetect.DetectLanguageSafe(const AText: string; ACurrentLang: string = string.Empty;

@@ -70,7 +70,6 @@ const
   MAGIC_COMPRESSED: array[0..3] of byte = ($47, $50, $52, $4F);  // "GPRO" – magic marker indicating zlib-compressed profile format
   DEF_TEST_MAXLEN = 500;                    // default maximum text length for the detection test
   DEF_TEST_ITER = 3;                        // default number of test iterations for each sample length
-  Z_BEST_COMPRESSION = 9;                   // profile data compression level
 
 type
   TTrigWeight = record
@@ -778,7 +777,7 @@ begin
           plainStream.WriteBuffer(FinalWeights[i][j], SizeOf(word));
         end;
 
-        comprStream := TOS.CompressMemoryStream(plainStream, Z_BEST_COMPRESSION);
+        comprStream := TOS.CompressMemoryStream(plainStream);
         try
           comprSize := comprStream.Size;
           fs.WriteBuffer(comprSize, SizeOf(comprSize));

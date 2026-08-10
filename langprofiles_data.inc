@@ -328,7 +328,7 @@ const
     );
 
   // ----- Hebrew (150 trigrams) -----
-  IW: array[0..149] of string = (
+  HE: array[0..149] of string = (
     'את ', 'של ', 'על ', 'לא ', 'עם ', 'גם ', 'זה ', 'כל ', 'אשר', 'בין',
     'אני', 'אתה', 'היא', 'הוא', 'אנח', 'אתם', 'אתן', 'הם ', 'הן ', 'היה',
     'היו', 'יהי', 'יש ', 'אין', 'אבל', 'אם ', 'כי ', 'איך', 'איזה', 'מה ',
@@ -657,8 +657,8 @@ begin
   FProfiles[14].Trigrams := ID;
   FProfiles[15].Code := 'it';
   FProfiles[15].Trigrams := IT;
-  FProfiles[16].Code := 'iw';
-  FProfiles[16].Trigrams := IW;
+  FProfiles[16].Code := 'he';
+  FProfiles[16].Trigrams := HE;
   FProfiles[17].Code := 'ja';
   FProfiles[17].Trigrams := JA;
   FProfiles[18].Code := 'ko';
