@@ -3,7 +3,7 @@ from datasets import load_dataset
 
 # Output directory next to this script
 BASE_DIR = Path(__file__).resolve().parent
-CORPUS_DIR = BASE_DIR / "corpus"
+CORPUS_DIR = BASE_DIR / "corpus10Mb"
 
 LIMIT = 10 * 1024 * 1024  # 10 MB (default, can be overridden)
 SKIP = 0                  # from beginning by default

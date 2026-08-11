@@ -316,12 +316,85 @@ type
     end;
   end;
 
-  // Return True if the trigram consists only of letters from the given script and spaces
-  function IsCleanTrigram(const trig: string; Script: TScriptType): boolean;
+  // Remove words that appear in >= DedupThreshold languages from AllWordLists in-place.
+  procedure DeduplicateWords(var AllWordLists: array of TWordFreqArray; DedupThreshold: integer; const ValidFiles: TStringList);
+  var
+    CommonWords: TStringList;
+    i, j, newCount: integer;
+    CleanArray: TWordFreqArray;
+  begin
+    if DedupThreshold < 2 then Exit;
+    LogToFile('Starting word deduplication...');
+    CommonWords := FindCommonWordsWithThreshold(AllWordLists, DedupThreshold);
+    LogToFile(Format('Word dedup: found %d common words appearing in >= %d languages.', [CommonWords.Count, DedupThreshold]));
+    if CommonWords.Count > 0 then
+    begin
+      for i := 0 to High(AllWordLists) do
+      begin
+        LogToFile(Format('  Dedup words [%d/%d] %s ...', [i + 1, Length(AllWordLists), ValidFiles[i]]));
+        SetLength(CleanArray, Length(AllWordLists[i]));
+        newCount := 0;
+        for j := 0 to High(AllWordLists[i]) do
+          if CommonWords.IndexOf(AllWordLists[i][j].W) < 0 then
+          begin
+            CleanArray[newCount] := AllWordLists[i][j];
+            Inc(newCount);
+          end;
+        SetLength(CleanArray, newCount);
+        AllWordLists[i] := CleanArray;
+      end;
+    end;
+    CommonWords.Free;
+    LogToFile('Word deduplication complete.');
+  end;
+
+  // Remove trigrams that appear in >= TrigDedupThreshold languages from AllTrigramLists in-place
+  procedure DeduplicateTrigrams(var AllTrigramLists: array of TStringList; TrigDedupThreshold: integer; const ValidFiles: TStringList);
+  var
+    TrigCommonList: TStringList;
+    i, j: integer;
+    CleanList: TStringList;
+    Trig: string;
+  begin
+    if TrigDedupThreshold <= 1 then Exit;
+    LogToFile('Starting trigram deduplication...');
+    TrigCommonList := FindCommonTrigramsWithThreshold(AllTrigramLists, TrigDedupThreshold);
+    LogToFile(Format('Trig dedup: found %d common trigrams appearing in >= %d languages.', [TrigCommonList.Count, TrigDedupThreshold]));
+    if TrigCommonList.Count > 0 then
+    begin
+      for i := 0 to High(AllTrigramLists) do
+      begin
+        if AllTrigramLists[i] = nil then Continue;
+        LogToFile(Format('  Dedup trigrams [%d/%d] %s ...', [i + 1, Length(AllTrigramLists), ValidFiles[i]]));
+        CleanList := TStringList.Create;
+        try
+          for j := 0 to AllTrigramLists[i].Count - 1 do
+          begin
+            Trig := AllTrigramLists[i][j];
+            if TrigCommonList.IndexOf(Trig) < 0 then   // binary search, fast
+              CleanList.AddObject(Trig, AllTrigramLists[i].Objects[j]);
+          end;
+          AllTrigramLists[i].Free;
+          AllTrigramLists[i] := CleanList;
+          CleanList := nil;   // prevent double-free
+        finally
+          CleanList.Free;
+        end;
+      end;
+    end;
+    TrigCommonList.Free;
+    LogToFile('Trigram deduplication complete.');
+  end;
+
+  // Return True if the trigram contains no obvious junk characters.
+  // FilterMode: 1 = remove control/format/private-use/surrogate/unassigned characters (keep letters, digits, punctuation, spaces),
+  //             2 = strict script filter (only letters of the script + space).
+  function IsCleanTrigram(const trig: string; Script: TScriptType; FilterMode: integer): boolean;
   var
     p: integer;
     cp: UCS4Char;
     charLen: integer;
+    cat: TUnicodeCategory;
   begin
     Result := False;
     p := 1;
@@ -332,28 +405,48 @@ type
       {$NOTES ON}
       if charLen = 0 then Exit;
       cp := UTF8CodepointToUnicode(PChar(@trig[p]), charLen);
-      // Allow space
-      if cp = $20 then
-      begin
-        Inc(p, charLen);
-        Continue;
+      case FilterMode of
+        1: begin
+          // Allow space (U+0020) for trigrams, remove other control/format/private-use/surrogates/unassigned
+          if cp = $20 then
+          begin
+            Inc(p, charLen);
+            Continue;
+          end;
+          cat := TCharacter.GetUnicodeCategory(widechar(cp));
+          if cat in [TUnicodeCategory.ucControl, TUnicodeCategory.ucFormat, TUnicodeCategory.ucSurrogate,
+            TUnicodeCategory.ucPrivateUse, TUnicodeCategory.ucUnassigned] then
+            Exit;
+        end;
+        2: begin
+          // Strict script filter: only letters belonging to the script, plus space
+          if cp = $20 then
+          begin
+            Inc(p, charLen);
+            Continue;
+          end;
+          {$NOTES OFF}
+          if not TCharacter.IsLetter(widechar(cp)) then Exit;
+          {$NOTES ON}
+          if not TLangDetect.IsCharOfScript(cp, Script) then Exit;
+        end;
+        else
+          Exit; // unknown mode – reject
       end;
-      // Must be a letter and belong to the script of the language
-      {$NOTES OFF}
-      if (cp > $FFFF) or (not TCharacter.IsLetter(widechar(cp))) then Exit;
-      {$NOTES ON}
-      if not TLangDetect.IsCharOfScript(cp, Script) then Exit;
       Inc(p, charLen);
     end;
     Result := True;
   end;
 
-  // Return True if the word consists only of letters from the given script (no spaces)
-  function IsCleanWord(const word: string; Script: TScriptType): boolean;
+  // Return True if the word contains no obvious junk characters.
+  // FilterMode: 1 = remove control/format/private-use/surrogate/unassigned and any whitespace (words can't have spaces),
+  //             2 = strict script filter (only letters of the script).
+  function IsCleanWord(const word: string; Script: TScriptType; FilterMode: integer): boolean;
   var
     p: integer;
     cp: UCS4Char;
     charLen: integer;
+    cat: TUnicodeCategory;
   begin
     Result := False;
     p := 1;
@@ -364,11 +457,25 @@ type
       {$NOTES ON}
       if charLen = 0 then Exit;
       cp := UTF8CodepointToUnicode(PChar(@word[p]), charLen);
-      // Must be a letter and belong to the script of the language
-      {$NOTES OFF}
-      if (cp > $FFFF) or (not TCharacter.IsLetter(widechar(cp))) then Exit;
-      {$NOTES ON}
-      if not TLangDetect.IsCharOfScript(cp, Script) then Exit;
+      case FilterMode of
+        1: begin
+          // No whitespace allowed in words; reject control/format/private-use/surrogates/unassigned
+          cat := TCharacter.GetUnicodeCategory(widechar(cp));
+          if cat in [TUnicodeCategory.ucControl, TUnicodeCategory.ucFormat, TUnicodeCategory.ucSurrogate,
+            TUnicodeCategory.ucPrivateUse, TUnicodeCategory.ucUnassigned,
+            TUnicodeCategory.ucSpaceSeparator, TUnicodeCategory.ucLineSeparator,
+            TUnicodeCategory.ucParagraphSeparator] then
+            Exit;
+        end;
+        2: begin
+          {$NOTES OFF}
+          if not TCharacter.IsLetter(widechar(cp)) then Exit;
+          {$NOTES ON}
+          if not TLangDetect.IsCharOfScript(cp, Script) then Exit;
+        end;
+        else
+          Exit;
+      end;
       Inc(p, charLen);
     end;
     Result := True;
@@ -551,6 +658,56 @@ type
     end;
   end;
 
+  // Filter trigrams and words in already aggregated lists using the current filter mode.
+  procedure FilterCorpusData(var AllTrigramLists: array of TStringList; var AllWordLists: array of TWordFreqArray;
+  const ValidFiles: TStringList; FilterMode: integer; NumWords: integer);
+  var
+    i, j, newCount: integer;
+    Script: TScriptType;
+    CleanTrigList: TStringList;
+    CleanWordArray: TWordFreqArray;
+  begin
+    if FilterMode <= 0 then Exit;
+    LogToFile('Filtering data (mode ' + IntToStr(FilterMode) + ')...');
+    for i := 0 to High(AllTrigramLists) do
+    begin
+      Script := TLangDetect.GetScriptByLang(ValidFiles[i]);
+      LogToFile(Format('  Filtering [%d/%d] %s ...', [i + 1, Length(AllTrigramLists), ValidFiles[i]]));
+
+      // Filter trigrams – build a new clean list
+      if AllTrigramLists[i] <> nil then
+      begin
+        CleanTrigList := TStringList.Create;
+        try
+          for j := 0 to AllTrigramLists[i].Count - 1 do
+            if IsCleanTrigram(AllTrigramLists[i][j], Script, FilterMode) then
+              CleanTrigList.AddObject(AllTrigramLists[i][j], AllTrigramLists[i].Objects[j]);
+          AllTrigramLists[i].Free;
+          AllTrigramLists[i] := CleanTrigList;
+          CleanTrigList := nil;   // prevent double free
+        finally
+          CleanTrigList.Free;
+        end;
+      end;
+
+      // Filter words – build a new clean array
+      if NumWords > 0 then
+      begin
+        SetLength(CleanWordArray, Length(AllWordLists[i]));
+        newCount := 0;
+        for j := 0 to High(AllWordLists[i]) do
+          if IsCleanWord(AllWordLists[i][j].W, Script, FilterMode) then
+          begin
+            CleanWordArray[newCount] := AllWordLists[i][j];
+            Inc(newCount);
+          end;
+        SetLength(CleanWordArray, newCount);
+        AllWordLists[i] := CleanWordArray;
+      end;
+    end;
+    LogToFile('Filtering complete.');
+  end;
+
   // Print short usage instructions and exit
   procedure ShowHelp;
   begin
@@ -582,7 +739,9 @@ type
     LogToFile('        -wl <min_len> : minimum word length (default 3)');
     LogToFile('        -d <threshold>: word dedup threshold (default 2)');
     LogToFile('        -td <threshold>: trigram dedup threshold (default 0 = off)');
-    LogToFile('        -f <1|0>      : filter out non-script characters (default 0)');
+    LogToFile('        -f <0|1|2>    : filter mode (0=off, 1=remove obvious junk, 2=strict script filter)');
+    LogToFile('        -fdt             : force deduplication of trigrams even when loading from cache');
+    LogToFile('        -fdw             : force deduplication of words even when loading from cache');
     LogToFile('  Examples (options at the end):');
     LogToFile('    langprofiles gen');
     LogToFile('    langprofiles gen mycorpus out.dat -n 1000 -w 500');
@@ -625,16 +784,16 @@ var
   AllWordLists: TWordFreqArrayArray = nil;
   FinalWords: array of TStringArray = nil;
   FinalWeights: array of TWordWeightArray = nil;
-  CommonWords: TStringList;
   DedupedList: TWordFreqArray = nil;
   wIdx: integer;
   ProfileFile: string = '';
   CorpusDirForTest: string;
   MaxLenSet: boolean = False;
   AllTrigramLists: TStringListArray = nil;   // stores unique trigrams with counts as Objects
-  TrigCommonList: TStringList;
   trigObjCount: integer;
   FilterLetter: integer;
+  ForceDedupTrig: boolean;
+  ForceDedupWord: boolean;
   Script: TScriptType;
   cacheLoaded: boolean;
   CacheFile: string;
@@ -652,6 +811,8 @@ begin
   DedupThreshold := DEF_DEDUP_THRESHOLD;
   TrigDedupThreshold := DEF_TRIG_DEDUP_THRESHOLD;
   FilterLetter := DEF_FILTER_LETTER;
+  ForceDedupTrig := False;
+  ForceDedupWord := False;
 
   TLangDetect.LoadProfiles;
 
@@ -712,7 +873,20 @@ begin
       if (ParamStr(i) = '-f') and (i + 1 <= ParamCount) then
       begin
         FilterLetter := StrToIntDef(ParamStr(i + 1), DEF_FILTER_LETTER);
+        if FilterLetter > 2 then FilterLetter := 2;
         Inc(i, 2);
+        Continue;
+      end;
+      if (ParamStr(i) = '-fdt') then
+      begin
+        ForceDedupTrig := True;
+        Inc(i);
+        Continue;
+      end;
+      if (ParamStr(i) = '-fdw') then
+      begin
+        ForceDedupWord := True;
+        Inc(i);
         Continue;
       end;
       if corpusDir = AppPath('corpus') then
@@ -775,6 +949,7 @@ begin
       totalLangs := validFiles.Count;
       LogToFile(Format('Loaded cached data for %d languages.', [totalLangs]));
       cacheLoaded := True;
+      FilterCorpusData(AllTrigramLists, AllWordLists, validFiles, FilterLetter, NumWords);
     end
     else
       LogToFile('Failed to load cache; will regenerate from scratch.');
@@ -836,11 +1011,11 @@ begin
       Script := TLangDetect.GetScriptByLang(langCode);
 
       // Filter out trigrams containing non-letter symbols or symbols from other scripts
-      if (FilterLetter = 1) and (trigArray <> nil) then
+      if (FilterLetter >= 1) and (trigArray <> nil) then
       begin
         j := 0;
         for k := 0 to High(trigArray) do
-          if IsCleanTrigram(trigArray[k], Script) then
+          if IsCleanTrigram(trigArray[k], Script, FilterLetter) then
           begin
             trigArray[j] := trigArray[k];
             Inc(j);
@@ -880,11 +1055,11 @@ begin
           CollectWordsFiltered(corpusText, MinWordLen, UTF8LowerCase(langCode), AllWordLists[i]);
 
           // Filter out words containing non-letter symbols or symbols from other scripts
-          if (FilterLetter = 1) and (Length(AllWordLists[i]) > 0) then
+          if (FilterLetter >= 1) and (Length(AllWordLists[i]) > 0) then
           begin
             j := 0;
             for k := 0 to High(AllWordLists[i]) do
-              if IsCleanWord(AllWordLists[i][k].W, Script) then
+              if IsCleanWord(AllWordLists[i][k].W, Script, FilterLetter) then
               begin
                 AllWordLists[i][j] := AllWordLists[i][k];
                 Inc(j);
@@ -895,78 +1070,35 @@ begin
       end;
     end;
 
-    // Deduplication phase (before caching)
-    // Words
+    // Deduplication before caching
     if NumWords > 0 then
-    begin
-      LogToFile('Starting word deduplication...');
-      CommonWords := FindCommonWordsWithThreshold(AllWordLists, DedupThreshold);
-      LogToFile(Format('Word dedup: removed %d words appearing in >= %d languages.', [CommonWords.Count, DedupThreshold]));
-      // Remove common words from AllWordLists in-place
-      if CommonWords.Count > 0 then
-      begin
-        for i := 0 to totalLangs - 1 do
-        begin
-          j := 0;
-          while j < Length(AllWordLists[i]) do
-          begin
-            if CommonWords.IndexOf(AllWordLists[i][j].W) >= 0 then
-            begin
-              AllWordLists[i][j] := AllWordLists[i][High(AllWordLists[i])];
-              SetLength(AllWordLists[i], Length(AllWordLists[i]) - 1);
-            end
-            else
-              Inc(j);
-          end;
-        end;
-      end;
-      CommonWords.Free;
-      CommonWords := nil;
-    end;
-
-    // Trigrams
-    if TrigDedupThreshold > 1 then
-    begin
-      LogToFile('Starting trigram deduplication...');
-      TrigCommonList := FindCommonTrigramsWithThreshold(AllTrigramLists, TrigDedupThreshold);
-      LogToFile(Format('Trig dedup: removed %d trigrams appearing in >= %d languages.', [TrigCommonList.Count, TrigDedupThreshold]));
-      // Remove common trigrams from AllTrigramLists in-place
-      if TrigCommonList.Count > 0 then
-      begin
-        for i := 0 to totalLangs - 1 do
-        begin
-          if AllTrigramLists[i] = nil then Continue;
-          j := 0;
-          while j < AllTrigramLists[i].Count do
-          begin
-            if TrigCommonList.IndexOf(AllTrigramLists[i][j]) >= 0 then
-              AllTrigramLists[i].Delete(j)
-            else
-              Inc(j);
-          end;
-        end;
-      end;
-      TrigCommonList.Free;
-      TrigCommonList := nil;
-    end;
+      DeduplicateWords(AllWordLists, DedupThreshold, validFiles);
+    DeduplicateTrigrams(AllTrigramLists, TrigDedupThreshold, validFiles);
 
     // Save prepared data (already deduplicated) into compressed cache
     LogToFile('Saving prepared data to cache...');
     SaveCorpusCache(CacheFile, validFiles, AllTrigramLists, AllWordLists);
     LogToFile('Cached prepared data to ' + CacheFile);
-  end
-  else
+  end;
+
+  // If data was loaded from cache and force dedup is enabled, run deduplication on the loaded data.
+  if cacheLoaded and (ForceDedupWord or ForceDedupTrig) then
   begin
-    // Data loaded from cache is already deduplicated – skip that phase
-    CommonWords := nil;
-    TrigCommonList := nil;
+    LogToFile('Forcing deduplication on cached data...');
+    if ForceDedupWord and (NumWords > 0) then
+      DeduplicateWords(AllWordLists, DedupThreshold, validFiles);
+    if ForceDedupTrig then
+      DeduplicateTrigrams(AllTrigramLists, TrigDedupThreshold, validFiles);
+    // Cache file is not updated; regenerate without -fd to update the cache permanently.
   end;
 
   // Build final word lists (from possibly deduplicated AllWordLists)
+  LogToFile('Building final word lists...');
   SetLength(FinalWords, totalLangs);
   SetLength(FinalWeights, totalLangs);
   for i := 0 to totalLangs - 1 do
   begin
+    LogToFile(Format('  Building words [%d/%d] %s ...', [i + 1, totalLangs, validFiles[i]]));
     SetLength(FinalWords[i], 0);
     SetLength(FinalWeights[i], 0);
 
@@ -1097,7 +1229,6 @@ begin
   // Cleanup
   for i := 0 to totalLangs - 1 do
     AllTrigramLists[i].Free;
-  // CommonWords and TrigCommonList already freed or nil
 
   LogToFile('Done. Profiles saved to ' + outFile);
   LogToFile('Text dump saved to ' + txtFilePath);
