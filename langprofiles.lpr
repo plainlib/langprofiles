@@ -85,6 +85,9 @@ type
   end;
   TWordFreqArray = array of TWordFreq;
 
+  TStringListArray = array of TStringList;
+  TWordFreqArrayArray = array of TWordFreqArray;
+
   // QuickSort for word frequency arrays (descending by count, then alphabetically)
   procedure SortWordFreqArray(var A: TWordFreqArray; L, R: integer);
   var
@@ -376,6 +379,127 @@ type
     Result := ConcatPaths([ExtractFilePath(ParamStr(0)), RelativePath]);
   end;
 
+  // Save prepared corpus data (trigrams and words) into a cache file
+  procedure SaveCorpusCache(const CacheFileName: string; const ValidFiles: TStringList;
+  const AllTrigramLists: array of TStringList; const AllWordLists: array of TWordFreqArray);
+  var
+    fs: TFileStream;
+    i, j, Count, len, freq: integer;
+    code: string;
+  begin
+    fs := TFileStream.Create(CacheFileName, fmCreate);
+    try
+      Count := ValidFiles.Count;
+      fs.WriteBuffer(Count, SizeOf(Count));
+      for i := 0 to Count - 1 do
+      begin
+        code := ValidFiles[i];
+        len := Length(code);
+        fs.WriteBuffer(len, SizeOf(len));
+        if len > 0 then
+          fs.WriteBuffer(code[1], len);
+
+        // Save trigrams
+        if AllTrigramLists[i] <> nil then
+          Count := AllTrigramLists[i].Count
+        else
+          Count := 0;
+        fs.WriteBuffer(Count, SizeOf(Count));
+        for j := 0 to Count - 1 do
+        begin
+          code := AllTrigramLists[i][j];
+          len := Length(code);
+          fs.WriteBuffer(len, SizeOf(len));
+          if len > 0 then
+            fs.WriteBuffer(code[1], len);
+          freq := PtrInt(AllTrigramLists[i].Objects[j]);
+          fs.WriteBuffer(freq, SizeOf(freq));
+        end;
+
+        // Save words
+        Count := Length(AllWordLists[i]);
+        fs.WriteBuffer(Count, SizeOf(Count));
+        for j := 0 to Count - 1 do
+        begin
+          code := AllWordLists[i][j].W;
+          len := Length(code);
+          fs.WriteBuffer(len, SizeOf(len));
+          if len > 0 then
+            fs.WriteBuffer(code[1], len);
+          freq := AllWordLists[i][j].C;
+          fs.WriteBuffer(freq, SizeOf(freq));
+        end;
+      end;
+    finally
+      fs.Free;
+    end;
+  end;
+
+  // Load prepared corpus data from a cache file
+  function LoadCorpusCache(const CacheFileName: string; out ValidFiles: TStringList; out AllTrigramLists: TStringListArray;
+    out AllWordLists: TWordFreqArrayArray): boolean;
+  var
+    fs: TFileStream;
+    i, j, totalLangs, Count, len, freq: integer;
+    code, trig, word: string;
+  begin
+    Result := False;
+    if not FileExists(CacheFileName) then Exit;
+    fs := TFileStream.Create(CacheFileName, fmOpenRead);
+    try
+      totalLangs := 0;
+      fs.ReadBuffer(totalLangs, SizeOf(totalLangs));
+      ValidFiles := TStringList.Create;
+      SetLength(AllTrigramLists, totalLangs);
+      SetLength(AllWordLists, totalLangs);
+      for i := 0 to totalLangs - 1 do
+      begin
+        len := 0;
+        fs.ReadBuffer(len, SizeOf(len));
+        SetLength(code, len);
+        if len > 0 then
+          fs.ReadBuffer(code[1], len);
+        ValidFiles.Add(code);
+
+        // Read trigrams
+        Count := 0;
+        fs.ReadBuffer(Count, SizeOf(Count));
+        AllTrigramLists[i] := TStringList.Create;
+        for j := 0 to Count - 1 do
+        begin
+          len := 0;
+          fs.ReadBuffer(len, SizeOf(len));
+          SetLength(trig, len);
+          if len > 0 then
+            fs.ReadBuffer(trig[1], len);
+          freq := 0;
+          fs.ReadBuffer(freq, SizeOf(freq));
+          AllTrigramLists[i].AddObject(trig, TObject(PtrInt(freq)));
+        end;
+
+        // Read words
+        Count := 0;
+        fs.ReadBuffer(Count, SizeOf(Count));
+        SetLength(AllWordLists[i], Count);
+        for j := 0 to Count - 1 do
+        begin
+          len := 0;
+          fs.ReadBuffer(len, SizeOf(len));
+          SetLength(word, len);
+          if len > 0 then
+            fs.ReadBuffer(word[1], len);
+          freq := 0;
+          fs.ReadBuffer(freq, SizeOf(freq));
+          AllWordLists[i][j].W := word;
+          AllWordLists[i][j].C := freq;
+        end;
+      end;
+      Result := True;
+    finally
+      fs.Free;
+    end;
+  end;
+
 var
   corpusDir, outFile, txtFilePath, langCode, fullPath: string;
   sr: TSearchRec;
@@ -401,7 +525,7 @@ var
   TrigDedupThreshold: integer;
   corpusText: string;
   IsCJKLang: boolean;
-  AllWordLists: array of TWordFreqArray = nil;
+  AllWordLists: TWordFreqArrayArray = nil;
   FinalWords: array of TStringArray = nil;
   FinalWeights: array of TWordWeightArray = nil;
   CommonWords: TStringList;
@@ -409,11 +533,13 @@ var
   wIdx: integer;
   ProfileFile: string = '';
   MaxLenSet: boolean = False;
-  AllTrigramLists: array of TStringList = nil;   // stores unique trigrams with counts as Objects
+  AllTrigramLists: TStringListArray = nil;   // stores unique trigrams with counts as Objects
   TrigCommonList: TStringList;
   trigObjCount: integer;
   FilterLetter: integer;
   Script: TScriptType;
+  cacheLoaded: boolean;
+  CacheFile: string;
 begin
   TestMaxLen := DEF_TEST_MAXLEN;
   TestIter := DEF_TEST_ITER;
@@ -524,119 +650,144 @@ begin
 
   // Generation mode
   corpusDir := IncludeTrailingPathDelimiter(corpusDir);
-  txtFilePath := ChangeFileExt(outFile, '.txt');
 
-  validFiles := TStringList.Create;
-  if FindFirst(corpusDir + '*.txt', faAnyFile, sr) = 0 then
+  // Build cache file name: <corpus_folder_name>.dat located next to the executable
+  CacheFile := AppPath(ExtractFileName(ExcludeTrailingPathDelimiter(corpusDir)) + '.dat');
+
+  txtFilePath := ChangeFileExt(outFile, '.txt');
+  cacheLoaded := False;
+  // Try to load cached prepared data
+  if FileExists(CacheFile) then
   begin
-    repeat
-      langCode := ChangeFileExt(sr.Name, '');
+    LogToFile('Found corpus cache file, trying to load...');
+    if LoadCorpusCache(CacheFile, validFiles, AllTrigramLists, AllWordLists) then
+    begin
+      totalLangs := validFiles.Count;
+      LogToFile(Format('Loaded cached data for %d languages.', [totalLangs]));
+      cacheLoaded := True;
+    end
+    else
+      LogToFile('Failed to load cache; will regenerate from scratch.');
+  end;
+
+  if not cacheLoaded then
+  begin
+    validFiles := TStringList.Create;
+    if FindFirst(corpusDir + '*.txt', faAnyFile, sr) = 0 then
+    begin
+      repeat
+        langCode := ChangeFileExt(sr.Name, '');
+        fullPath := corpusDir + langCode + '.txt';
+        with TStringList.Create do
+        begin
+          LoadFromFile(fullPath, TEncoding.UTF8);
+          if UTF8Length(Text) >= MIN_TEXT_LENGTH then
+            validFiles.Add(langCode)
+          else
+            LogToFile('Skipping ' + langCode + ' (corpus too short)');
+          Free;
+        end;
+      until FindNext(sr) <> 0;
+      FindClose(sr);
+    end;
+    if validFiles.Count = 0 then
+    begin
+      LogToFile('No valid corpora found.');
+      Halt(1);
+    end;
+    totalLangs := validFiles.Count;
+
+    // Allocate arrays for raw data
+    SetLength(AllWordLists, totalLangs);
+    SetLength(AllTrigramLists, totalLangs);
+    for i := 0 to totalLangs - 1 do
+    begin
+      SetLength(AllWordLists[i], 0);
+      AllTrigramLists[i] := nil;
+    end;
+
+    // Single collection pass
+    LogToFile('Collecting trigrams and words...');
+    for i := 0 to totalLangs - 1 do
+    begin
+      langCode := validFiles[i];
+      LogToFile(Format('  Collect [%d/%d] %s ...', [i + 1, totalLangs, langCode]));
       fullPath := corpusDir + langCode + '.txt';
+
       with TStringList.Create do
       begin
         LoadFromFile(fullPath, TEncoding.UTF8);
-        if UTF8Length(Text) >= MIN_TEXT_LENGTH then
-          validFiles.Add(langCode)
-        else
-          LogToFile('Skipping ' + langCode + ' (corpus too short)');
+        corpusText := Text;
+        trigArray := TLangDetect.ExtractCharTrigrams(Text);
         Free;
       end;
-    until FindNext(sr) <> 0;
-    FindClose(sr);
-  end;
-  if validFiles.Count = 0 then
-  begin
-    LogToFile('No valid corpora found.');
-    Halt(1);
-  end;
-  totalLangs := validFiles.Count;
 
-  // Allocate arrays for raw data
-  SetLength(AllWordLists, totalLangs);
-  SetLength(AllTrigramLists, totalLangs);
-  for i := 0 to totalLangs - 1 do
-  begin
-    SetLength(AllWordLists[i], 0);
-    AllTrigramLists[i] := nil;
-  end;
+      // Determine script for current language (used only when -f is active)
+      Script := TLangDetect.GetScriptByLang(langCode);
 
-  // Single collection pass
-  LogToFile('Collecting trigrams and words...');
-  for i := 0 to totalLangs - 1 do
-  begin
-    langCode := validFiles[i];
-    LogToFile(Format('  Collect [%d/%d] %s ...', [i + 1, totalLangs, langCode]));
-    fullPath := corpusDir + langCode + '.txt';
-
-    with TStringList.Create do
-    begin
-      LoadFromFile(fullPath, TEncoding.UTF8);
-      corpusText := Text;
-      trigArray := TLangDetect.ExtractCharTrigrams(Text);
-      Free;
-    end;
-
-    // Determine script for current language (used only when -f is active)
-    Script := TLangDetect.GetScriptByLang(langCode);
-
-    // Filter out trigrams containing non-letter symbols or symbols from other scripts
-    if (FilterLetter = 1) and (trigArray <> nil) then
-    begin
-      j := 0;
-      for k := 0 to High(trigArray) do
-        if IsCleanTrigram(trigArray[k], Script) then
-        begin
-          trigArray[j] := trigArray[k];
-          Inc(j);
-        end;
-      SetLength(trigArray, j);
-    end;
-
-    // Process trigrams
-    if trigArray <> nil then
-    begin
-      freqMap := TStringList.Create;
-      freqMap.Sorted := True;
-      freqMap.Duplicates := dupIgnore;
-      totalTrigrams := 0;
-      for j := 0 to High(trigArray) do
+      // Filter out trigrams containing non-letter symbols or symbols from other scripts
+      if (FilterLetter = 1) and (trigArray <> nil) then
       begin
-        k := freqMap.IndexOf(trigArray[j]);
-        if k >= 0 then
-          freqMap.Objects[k] := TObject(PtrInt(freqMap.Objects[k]) + 1)
-        else
-          freqMap.AddObject(trigArray[j], TObject(1));
-        Inc(totalTrigrams);
+        j := 0;
+        for k := 0 to High(trigArray) do
+          if IsCleanTrigram(trigArray[k], Script) then
+          begin
+            trigArray[j] := trigArray[k];
+            Inc(j);
+          end;
+        SetLength(trigArray, j);
       end;
 
-      AllTrigramLists[i] := TStringList.Create;
-      for j := 0 to freqMap.Count - 1 do
-        AllTrigramLists[i].AddObject(freqMap[j], freqMap.Objects[j]);
-      freqMap.Free;
-    end;
-
-    // Collect words for later dedup
-    if NumWords > 0 then
-    begin
-      IsCJKLang := (langCode = 'zh') or (langCode = 'zh-CN') or (langCode = 'zh-TW') or (langCode = 'ja') or (langCode = 'ko');
-      if not IsCJKLang then
+      // Process trigrams
+      if trigArray <> nil then
       begin
-        CollectWordsFiltered(corpusText, MinWordLen, UTF8LowerCase(langCode), AllWordLists[i]);
-
-        // Filter out words containing non-letter symbols or symbols from other scripts
-        if (FilterLetter = 1) and (Length(AllWordLists[i]) > 0) then
+        freqMap := TStringList.Create;
+        freqMap.Sorted := True;
+        freqMap.Duplicates := dupIgnore;
+        totalTrigrams := 0;
+        for j := 0 to High(trigArray) do
         begin
-          j := 0;
-          for k := 0 to High(AllWordLists[i]) do
-            if IsCleanWord(AllWordLists[i][k].W, Script) then
-            begin
-              AllWordLists[i][j] := AllWordLists[i][k];
-              Inc(j);
-            end;
-          SetLength(AllWordLists[i], j);
+          k := freqMap.IndexOf(trigArray[j]);
+          if k >= 0 then
+            freqMap.Objects[k] := TObject(PtrInt(freqMap.Objects[k]) + 1)
+          else
+            freqMap.AddObject(trigArray[j], TObject(1));
+          Inc(totalTrigrams);
+        end;
+
+        AllTrigramLists[i] := TStringList.Create;
+        for j := 0 to freqMap.Count - 1 do
+          AllTrigramLists[i].AddObject(freqMap[j], freqMap.Objects[j]);
+        freqMap.Free;
+      end;
+
+      // Collect words for later dedup
+      if NumWords > 0 then
+      begin
+        IsCJKLang := (langCode = 'zh') or (langCode = 'zh-CN') or (langCode = 'zh-TW') or (langCode = 'ja') or (langCode = 'ko');
+        if not IsCJKLang then
+        begin
+          CollectWordsFiltered(corpusText, MinWordLen, UTF8LowerCase(langCode), AllWordLists[i]);
+
+          // Filter out words containing non-letter symbols or symbols from other scripts
+          if (FilterLetter = 1) and (Length(AllWordLists[i]) > 0) then
+          begin
+            j := 0;
+            for k := 0 to High(AllWordLists[i]) do
+              if IsCleanWord(AllWordLists[i][k].W, Script) then
+              begin
+                AllWordLists[i][j] := AllWordLists[i][k];
+                Inc(j);
+              end;
+            SetLength(AllWordLists[i], j);
+          end;
         end;
       end;
     end;
+
+    // Save prepared data into cache for future runs
+    SaveCorpusCache(CacheFile, validFiles, AllTrigramLists, AllWordLists);
+    LogToFile('Cached prepared data to ' + CacheFile);
   end;
 
   // Deduplication phase
@@ -645,6 +796,7 @@ begin
   CommonWords := nil;
   if NumWords > 0 then
   begin
+    LogToFile('Starting word deduplication...');
     CommonWords := FindCommonWordsWithThreshold(AllWordLists, DedupThreshold);
     LogToFile(Format('Word dedup: removed %d words appearing in >= %d languages.', [CommonWords.Count, DedupThreshold]));
   end;
@@ -653,6 +805,7 @@ begin
   TrigCommonList := nil;
   if TrigDedupThreshold > 1 then
   begin
+    LogToFile('Starting trigram deduplication...');
     TrigCommonList := FindCommonTrigramsWithThreshold(AllTrigramLists, TrigDedupThreshold);
     LogToFile(Format('Trig dedup: removed %d trigrams appearing in >= %d languages.', [TrigCommonList.Count, TrigDedupThreshold]));
   end;
