@@ -68,6 +68,7 @@ const
   DEF_TRIG_DEDUP_THRESHOLD = 0;             // default trigram dedup threshold (0=off)
   DEF_FILTER_LETTER = 0;                    // default filter out trigrams containing non-script-letter
   MAGIC_COMPRESSED: array[0..3] of byte = ($47, $50, $52, $4F);  // "GPRO" – magic marker indicating zlib-compressed profile format
+  MAGIC_CACHE: array[0..3] of byte = ($43, $43, $4D, $50);  // "CCMP" – corpus cache compressed marker
   DEF_TEST_MAXLEN = 500;                    // default maximum text length for the detection test
   DEF_TEST_ITER = 3;                        // default number of test iterations for each sample length
 
@@ -379,125 +380,221 @@ type
     Result := ConcatPaths([ExtractFilePath(ParamStr(0)), RelativePath]);
   end;
 
-  // Save prepared corpus data (trigrams and words) into a cache file
+  // Save prepared corpus data (trigrams and words) into a compressed cache file
   procedure SaveCorpusCache(const CacheFileName: string; const ValidFiles: TStringList;
   const AllTrigramLists: array of TStringList; const AllWordLists: array of TWordFreqArray);
   var
+    plainStream, comprStream: TMemoryStream;
     fs: TFileStream;
     i, j, Count, len, freq: integer;
     code: string;
   begin
-    fs := TFileStream.Create(CacheFileName, fmCreate);
+    LogToFile('Compressing cache data...');
+    plainStream := TMemoryStream.Create;
     try
       Count := ValidFiles.Count;
-      fs.WriteBuffer(Count, SizeOf(Count));
+      plainStream.WriteBuffer(Count, SizeOf(Count));
       for i := 0 to Count - 1 do
       begin
         code := ValidFiles[i];
         len := Length(code);
-        fs.WriteBuffer(len, SizeOf(len));
+        plainStream.WriteBuffer(len, SizeOf(len));
         if len > 0 then
-          fs.WriteBuffer(code[1], len);
+          plainStream.WriteBuffer(code[1], len);
 
         // Save trigrams
         if AllTrigramLists[i] <> nil then
           Count := AllTrigramLists[i].Count
         else
           Count := 0;
-        fs.WriteBuffer(Count, SizeOf(Count));
+        plainStream.WriteBuffer(Count, SizeOf(Count));
         for j := 0 to Count - 1 do
         begin
           code := AllTrigramLists[i][j];
           len := Length(code);
-          fs.WriteBuffer(len, SizeOf(len));
+          plainStream.WriteBuffer(len, SizeOf(len));
           if len > 0 then
-            fs.WriteBuffer(code[1], len);
+            plainStream.WriteBuffer(code[1], len);
           freq := PtrInt(AllTrigramLists[i].Objects[j]);
-          fs.WriteBuffer(freq, SizeOf(freq));
+          plainStream.WriteBuffer(freq, SizeOf(freq));
         end;
 
         // Save words
         Count := Length(AllWordLists[i]);
-        fs.WriteBuffer(Count, SizeOf(Count));
+        plainStream.WriteBuffer(Count, SizeOf(Count));
         for j := 0 to Count - 1 do
         begin
           code := AllWordLists[i][j].W;
           len := Length(code);
-          fs.WriteBuffer(len, SizeOf(len));
+          plainStream.WriteBuffer(len, SizeOf(len));
           if len > 0 then
-            fs.WriteBuffer(code[1], len);
+            plainStream.WriteBuffer(code[1], len);
           freq := AllWordLists[i][j].C;
-          fs.WriteBuffer(freq, SizeOf(freq));
+          plainStream.WriteBuffer(freq, SizeOf(freq));
         end;
+      end;
+
+      plainStream.Position := 0;
+      comprStream := TOS.CompressMemoryStream(plainStream);
+      try
+        LogToFile('Cache compressed, saving to file...');
+        fs := TFileStream.Create(CacheFileName, fmCreate);
+        try
+          fs.WriteBuffer(MAGIC_CACHE[0], SizeOf(MAGIC_CACHE));
+          fs.CopyFrom(comprStream, comprStream.Size);
+        finally
+          fs.Free;
+        end;
+      finally
+        comprStream.Free;
+      end;
+    finally
+      plainStream.Free;
+    end;
+  end;
+
+  // Load prepared corpus data from a compressed cache file
+  function LoadCorpusCache(const CacheFileName: string; out ValidFiles: TStringList; out AllTrigramLists: TStringListArray;
+    out AllWordLists: TWordFreqArrayArray): boolean;
+  var
+    fs: TFileStream;
+    magic: array[0..3] of byte;
+    comprStream, plainStream: TMemoryStream;
+    i, j, totalLangs, Count, len, freq: integer;
+    code, trig, word: string;
+  begin
+    Result := False;
+    if not FileExists(CacheFileName) then Exit;
+
+    LogToFile('Loading cache from file...');
+    fs := TFileStream.Create(CacheFileName, fmOpenRead);
+    try
+      // Check magic
+      magic[0] := 0;
+      magic[1] := 0;
+      magic[2] := 0;
+      magic[3] := 0;
+      fs.ReadBuffer(magic[0], SizeOf(magic));
+      if (magic[0] <> MAGIC_CACHE[0]) or (magic[1] <> MAGIC_CACHE[1]) or (magic[2] <> MAGIC_CACHE[2]) or
+        (magic[3] <> MAGIC_CACHE[3]) then
+      begin
+        LogToFile('Invalid cache format (missing CCMP marker).');
+        Exit;
+      end;
+
+      // Read the rest as compressed data
+      comprStream := TMemoryStream.Create;
+      try
+        comprStream.CopyFrom(fs, fs.Size - fs.Position);
+        comprStream.Position := 0;
+        LogToFile('Decompressing cache data...');
+        plainStream := TOS.DecompressMemoryStream(comprStream);
+        try
+          plainStream.Position := 0;
+          totalLangs := 0;
+          plainStream.ReadBuffer(totalLangs, SizeOf(totalLangs));
+          ValidFiles := TStringList.Create;
+          SetLength(AllTrigramLists, totalLangs);
+          SetLength(AllWordLists, totalLangs);
+          for i := 0 to totalLangs - 1 do
+          begin
+            len := 0;
+            plainStream.ReadBuffer(len, SizeOf(len));
+            SetLength(code, len);
+            if len > 0 then
+              plainStream.ReadBuffer(code[1], len);
+            ValidFiles.Add(code);
+
+            // Read trigrams
+            Count := 0;
+            plainStream.ReadBuffer(Count, SizeOf(Count));
+            AllTrigramLists[i] := TStringList.Create;
+            for j := 0 to Count - 1 do
+            begin
+              len := 0;
+              plainStream.ReadBuffer(len, SizeOf(len));
+              SetLength(trig, len);
+              if len > 0 then
+                plainStream.ReadBuffer(trig[1], len);
+              freq := 0;
+              plainStream.ReadBuffer(freq, SizeOf(freq));
+              AllTrigramLists[i].AddObject(trig, TObject(PtrInt(freq)));
+            end;
+
+            // Read words
+            Count := 0;
+            plainStream.ReadBuffer(Count, SizeOf(Count));
+            SetLength(AllWordLists[i], Count);
+            for j := 0 to Count - 1 do
+            begin
+              len := 0;
+              plainStream.ReadBuffer(len, SizeOf(len));
+              SetLength(word, len);
+              if len > 0 then
+                plainStream.ReadBuffer(word[1], len);
+              freq := 0;
+              plainStream.ReadBuffer(freq, SizeOf(freq));
+              AllWordLists[i][j].W := word;
+              AllWordLists[i][j].C := freq;
+            end;
+          end;
+          Result := True;
+          LogToFile('Cache loaded successfully.');
+        finally
+          plainStream.Free;
+        end;
+      finally
+        comprStream.Free;
       end;
     finally
       fs.Free;
     end;
   end;
 
-  // Load prepared corpus data from a cache file
-  function LoadCorpusCache(const CacheFileName: string; out ValidFiles: TStringList; out AllTrigramLists: TStringListArray;
-    out AllWordLists: TWordFreqArrayArray): boolean;
-  var
-    fs: TFileStream;
-    i, j, totalLangs, Count, len, freq: integer;
-    code, trig, word: string;
+  // Print short usage instructions and exit
+  procedure ShowHelp;
   begin
-    Result := False;
-    if not FileExists(CacheFileName) then Exit;
-    fs := TFileStream.Create(CacheFileName, fmOpenRead);
-    try
-      totalLangs := 0;
-      fs.ReadBuffer(totalLangs, SizeOf(totalLangs));
-      ValidFiles := TStringList.Create;
-      SetLength(AllTrigramLists, totalLangs);
-      SetLength(AllWordLists, totalLangs);
-      for i := 0 to totalLangs - 1 do
-      begin
-        len := 0;
-        fs.ReadBuffer(len, SizeOf(len));
-        SetLength(code, len);
-        if len > 0 then
-          fs.ReadBuffer(code[1], len);
-        ValidFiles.Add(code);
-
-        // Read trigrams
-        Count := 0;
-        fs.ReadBuffer(Count, SizeOf(Count));
-        AllTrigramLists[i] := TStringList.Create;
-        for j := 0 to Count - 1 do
-        begin
-          len := 0;
-          fs.ReadBuffer(len, SizeOf(len));
-          SetLength(trig, len);
-          if len > 0 then
-            fs.ReadBuffer(trig[1], len);
-          freq := 0;
-          fs.ReadBuffer(freq, SizeOf(freq));
-          AllTrigramLists[i].AddObject(trig, TObject(PtrInt(freq)));
-        end;
-
-        // Read words
-        Count := 0;
-        fs.ReadBuffer(Count, SizeOf(Count));
-        SetLength(AllWordLists[i], Count);
-        for j := 0 to Count - 1 do
-        begin
-          len := 0;
-          fs.ReadBuffer(len, SizeOf(len));
-          SetLength(word, len);
-          if len > 0 then
-            fs.ReadBuffer(word[1], len);
-          freq := 0;
-          fs.ReadBuffer(freq, SizeOf(freq));
-          AllWordLists[i][j].W := word;
-          AllWordLists[i][j].C := freq;
-        end;
-      end;
-      Result := True;
-    finally
-      fs.Free;
-    end;
+    LogToFile('Language profile generator and detection test utility');
+    LogToFile('');
+    LogToFile('Syntax: langprofiles [mode] [required args] [options]');
+    LogToFile('Options (starting with -) can be placed anywhere, but the recommended order is');
+    LogToFile('positional arguments first, then options.');
+    LogToFile('');
+    LogToFile('TEST MODE');
+    LogToFile('  langprofiles [max_len] [iter] [-d <corpus_dir>] [-pf <profile_file>]');
+    LogToFile('      max_len         : max sample length in characters (default 500)');
+    LogToFile('      iter            : number of test iterations per file (default 3)');
+    LogToFile('      -d <corpus_dir> : corpus folder to test (default .\corpus)');
+    LogToFile('      -pf <file>      : load extra detection profile');
+    LogToFile('  Examples:');
+    LogToFile('    langprofiles');
+    LogToFile('    langprofiles 300 5');
+    LogToFile('    langprofiles 300 5 -d mycorpus');
+    LogToFile('    langprofiles 200 2 -d testdata -pf custom.dat');
+    LogToFile('');
+    LogToFile('GENERATION MODE');
+    LogToFile('  langprofiles gen [corpus_dir] [out_file] [options]');
+    LogToFile('      corpus_dir      : input folder with .txt corpora (default .\corpus)');
+    LogToFile('      out_file        : output profile file (default .\langprofiles.dat)');
+    LogToFile('      Options (after positional args):');
+    LogToFile('        -n <N>        : number of trigrams per language (default 800)');
+    LogToFile('        -w <W>        : number of words per language (default 1000)');
+    LogToFile('        -wl <min_len> : minimum word length (default 3)');
+    LogToFile('        -d <threshold>: word dedup threshold (default 2)');
+    LogToFile('        -td <threshold>: trigram dedup threshold (default 0 = off)');
+    LogToFile('        -f <1|0>      : filter out non-script characters (default 0)');
+    LogToFile('  Examples (options at the end):');
+    LogToFile('    langprofiles gen');
+    LogToFile('    langprofiles gen mycorpus out.dat -n 1000 -w 500');
+    LogToFile('    langprofiles gen mycorpus out.dat -d 3 -td 5 -f 1');
+    LogToFile('');
+    LogToFile('INFO MODE');
+    LogToFile('  langprofiles -i / -info [-pf <profile_file>]');
+    LogToFile('      Show loaded profile details.');
+    LogToFile('');
+    LogToFile('  langprofiles /? /help --help ?   This help.');
+    WaitForEsc;
+    Halt(0);
   end;
 
 var
@@ -532,6 +629,7 @@ var
   DedupedList: TWordFreqArray = nil;
   wIdx: integer;
   ProfileFile: string = '';
+  CorpusDirForTest: string;
   MaxLenSet: boolean = False;
   AllTrigramLists: TStringListArray = nil;   // stores unique trigrams with counts as Objects
   TrigCommonList: TStringList;
@@ -541,6 +639,11 @@ var
   cacheLoaded: boolean;
   CacheFile: string;
 begin
+  // Check for help request (any of the known help flags as first parameter)
+  if (ParamCount >= 1) and ((ParamStr(1) = '/?') or (ParamStr(1) = '?') or (ParamStr(1) = '--?') or
+    (ParamStr(1) = '--help') or (LowerCase(ParamStr(1)) = 'help') or (ParamStr(1) = '/help')) then
+    ShowHelp;
+
   TestMaxLen := DEF_TEST_MAXLEN;
   TestIter := DEF_TEST_ITER;
   NumTrigrams := DEF_TRIG_TOP;
@@ -622,6 +725,7 @@ begin
   else
   begin
     ProfileFile := '';
+    CorpusDirForTest := AppPath('corpus');
     TestMaxLen := DEF_TEST_MAXLEN;
     TestIter := DEF_TEST_ITER;
     i := 1;
@@ -630,6 +734,12 @@ begin
       if (ParamStr(i) = '-pf') and (i + 1 <= ParamCount) then
       begin
         ProfileFile := ParamStr(i + 1);
+        Inc(i, 2);
+        Continue;
+      end;
+      if (ParamStr(i) = '-d') and (i + 1 <= ParamCount) then
+      begin
+        CorpusDirForTest := ParamStr(i + 1);
         Inc(i, 2);
         Continue;
       end;
@@ -643,18 +753,18 @@ begin
       Inc(i);
     end;
     if TestIter < 1 then TestIter := 1;
-    RunLanguageDetectionTest(AppPath('corpus'), TestMaxLen, TestIter, ProfileFile);
+    RunLanguageDetectionTest(CorpusDirForTest, TestMaxLen, TestIter, ProfileFile);
     WaitForEsc;
     Halt;
   end;
 
   // Generation mode
   corpusDir := IncludeTrailingPathDelimiter(corpusDir);
+  txtFilePath := ChangeFileExt(outFile, '.txt');
 
   // Build cache file name: <corpus_folder_name>.dat located next to the executable
   CacheFile := AppPath(ExtractFileName(ExcludeTrailingPathDelimiter(corpusDir)) + '.dat');
 
-  txtFilePath := ChangeFileExt(outFile, '.txt');
   cacheLoaded := False;
   // Try to load cached prepared data
   if FileExists(CacheFile) then
@@ -785,32 +895,74 @@ begin
       end;
     end;
 
-    // Save prepared data into cache for future runs
+    // Deduplication phase (before caching)
+    // Words
+    if NumWords > 0 then
+    begin
+      LogToFile('Starting word deduplication...');
+      CommonWords := FindCommonWordsWithThreshold(AllWordLists, DedupThreshold);
+      LogToFile(Format('Word dedup: removed %d words appearing in >= %d languages.', [CommonWords.Count, DedupThreshold]));
+      // Remove common words from AllWordLists in-place
+      if CommonWords.Count > 0 then
+      begin
+        for i := 0 to totalLangs - 1 do
+        begin
+          j := 0;
+          while j < Length(AllWordLists[i]) do
+          begin
+            if CommonWords.IndexOf(AllWordLists[i][j].W) >= 0 then
+            begin
+              AllWordLists[i][j] := AllWordLists[i][High(AllWordLists[i])];
+              SetLength(AllWordLists[i], Length(AllWordLists[i]) - 1);
+            end
+            else
+              Inc(j);
+          end;
+        end;
+      end;
+      CommonWords.Free;
+      CommonWords := nil;
+    end;
+
+    // Trigrams
+    if TrigDedupThreshold > 1 then
+    begin
+      LogToFile('Starting trigram deduplication...');
+      TrigCommonList := FindCommonTrigramsWithThreshold(AllTrigramLists, TrigDedupThreshold);
+      LogToFile(Format('Trig dedup: removed %d trigrams appearing in >= %d languages.', [TrigCommonList.Count, TrigDedupThreshold]));
+      // Remove common trigrams from AllTrigramLists in-place
+      if TrigCommonList.Count > 0 then
+      begin
+        for i := 0 to totalLangs - 1 do
+        begin
+          if AllTrigramLists[i] = nil then Continue;
+          j := 0;
+          while j < AllTrigramLists[i].Count do
+          begin
+            if TrigCommonList.IndexOf(AllTrigramLists[i][j]) >= 0 then
+              AllTrigramLists[i].Delete(j)
+            else
+              Inc(j);
+          end;
+        end;
+      end;
+      TrigCommonList.Free;
+      TrigCommonList := nil;
+    end;
+
+    // Save prepared data (already deduplicated) into compressed cache
+    LogToFile('Saving prepared data to cache...');
     SaveCorpusCache(CacheFile, validFiles, AllTrigramLists, AllWordLists);
     LogToFile('Cached prepared data to ' + CacheFile);
-  end;
-
-  // Deduplication phase
-
-  // Words
-  CommonWords := nil;
-  if NumWords > 0 then
+  end
+  else
   begin
-    LogToFile('Starting word deduplication...');
-    CommonWords := FindCommonWordsWithThreshold(AllWordLists, DedupThreshold);
-    LogToFile(Format('Word dedup: removed %d words appearing in >= %d languages.', [CommonWords.Count, DedupThreshold]));
+    // Data loaded from cache is already deduplicated – skip that phase
+    CommonWords := nil;
+    TrigCommonList := nil;
   end;
 
-  // Trigrams
-  TrigCommonList := nil;
-  if TrigDedupThreshold > 1 then
-  begin
-    LogToFile('Starting trigram deduplication...');
-    TrigCommonList := FindCommonTrigramsWithThreshold(AllTrigramLists, TrigDedupThreshold);
-    LogToFile(Format('Trig dedup: removed %d trigrams appearing in >= %d languages.', [TrigCommonList.Count, TrigDedupThreshold]));
-  end;
-
-  // Build final word lists
+  // Build final word lists (from possibly deduplicated AllWordLists)
   SetLength(FinalWords, totalLangs);
   SetLength(FinalWeights, totalLangs);
   for i := 0 to totalLangs - 1 do
@@ -820,13 +972,10 @@ begin
 
     if Length(AllWordLists[i]) > 0 then
     begin
-      SetLength(DedupedList, 0);
+      // Already deduplicated, just sort and truncate
+      SetLength(DedupedList, Length(AllWordLists[i]));
       for j := 0 to High(AllWordLists[i]) do
-        if (CommonWords = nil) or (CommonWords.IndexOf(AllWordLists[i][j].W) < 0) then
-        begin
-          SetLength(DedupedList, Length(DedupedList) + 1);
-          DedupedList[High(DedupedList)] := AllWordLists[i][j];
-        end;
+        DedupedList[j] := AllWordLists[i][j];
 
       if Length(DedupedList) > 1 then
         SortWordFreqArray(DedupedList, 0, High(DedupedList));
@@ -859,7 +1008,7 @@ begin
       langCode := validFiles[i];
       LogToFile(Format('  Write [%d/%d] %s ...', [i + 1, totalLangs, langCode]));
 
-      // Compute trigram weights from stored data
+      // Compute trigram weights from stored data (already deduplicated if TrigDedupThreshold > 1)
       SetLength(weights, 0);
       trigCount := 0;
       if AllTrigramLists[i] <> nil then
@@ -876,22 +1025,6 @@ begin
           logProb := ln((trigObjCount + 1) / (totalTrigrams + vocabSize));
           weights[j].Trig := AllTrigramLists[i][j];
           weights[j].LogWeight := Round(logProb * LOG_SCALE);
-        end;
-
-        // Filter out common trigrams
-        if TrigCommonList <> nil then
-        begin
-          j := 0;
-          while j < Length(weights) do
-          begin
-            if TrigCommonList.IndexOf(weights[j].Trig) >= 0 then
-            begin
-              weights[j] := weights[High(weights)];
-              SetLength(weights, Length(weights) - 1);
-            end
-            else
-              Inc(j);
-          end;
         end;
 
         // Sort and truncate
@@ -964,8 +1097,7 @@ begin
   // Cleanup
   for i := 0 to totalLangs - 1 do
     AllTrigramLists[i].Free;
-  CommonWords.Free;
-  TrigCommonList.Free;
+  // CommonWords and TrigCommonList already freed or nil
 
   LogToFile('Done. Profiles saved to ' + outFile);
   LogToFile('Text dump saved to ' + txtFilePath);
