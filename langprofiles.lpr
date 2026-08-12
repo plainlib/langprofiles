@@ -321,7 +321,7 @@ type
   var
     CommonWords: TStringList;
     i, j, newCount: integer;
-    CleanArray: TWordFreqArray;
+    CleanArray: TWordFreqArray = nil;
   begin
     if DedupThreshold < 2 then Exit;
     LogToFile('Starting word deduplication...');
@@ -462,9 +462,8 @@ type
           // No whitespace allowed in words; reject control/format/private-use/surrogates/unassigned
           cat := TCharacter.GetUnicodeCategory(widechar(cp));
           if cat in [TUnicodeCategory.ucControl, TUnicodeCategory.ucFormat, TUnicodeCategory.ucSurrogate,
-            TUnicodeCategory.ucPrivateUse, TUnicodeCategory.ucUnassigned,
-            TUnicodeCategory.ucSpaceSeparator, TUnicodeCategory.ucLineSeparator,
-            TUnicodeCategory.ucParagraphSeparator] then
+            TUnicodeCategory.ucPrivateUse, TUnicodeCategory.ucUnassigned, TUnicodeCategory.ucSpaceSeparator,
+            TUnicodeCategory.ucLineSeparator, TUnicodeCategory.ucParagraphSeparator] then
             Exit;
         end;
         2: begin
@@ -496,7 +495,7 @@ type
     i, j, Count, len, freq: integer;
     code: string;
   begin
-    LogToFile('Compressing cache data...');
+    LogToFile(Format('Compressing cache data: %d trigram lists, %d word lists', [Length(AllTrigramLists), Length(AllWordLists)]));
     plainStream := TMemoryStream.Create;
     try
       Count := ValidFiles.Count;
@@ -510,7 +509,7 @@ type
           plainStream.WriteBuffer(code[1], len);
 
         // Save trigrams
-        if AllTrigramLists[i] <> nil then
+        if (AllTrigramLists[i] <> nil) then
           Count := AllTrigramLists[i].Count
         else
           Count := 0;
@@ -572,6 +571,12 @@ type
   begin
     Result := False;
     if not FileExists(CacheFileName) then Exit;
+
+    AllTrigramLists := nil;
+    AllWordLists := nil;
+    code := string.Empty;
+    trig := string.Empty;
+    word := string.Empty;
 
     LogToFile('Loading cache from file...');
     fs := TFileStream.Create(CacheFileName, fmOpenRead);
@@ -665,7 +670,7 @@ type
     i, j, newCount: integer;
     Script: TScriptType;
     CleanTrigList: TStringList;
-    CleanWordArray: TWordFreqArray;
+    CleanWordArray: TWordFreqArray = nil;
   begin
     if FilterMode <= 0 then Exit;
     LogToFile('Filtering data (mode ' + IntToStr(FilterMode) + ')...');
